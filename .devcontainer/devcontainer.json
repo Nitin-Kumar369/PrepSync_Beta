@@ -1,0 +1,10 @@
+{
+  "name": "PrepSync Codespace",
+  "dockerComposeFile": ["docker-compose.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [8000, 5173],
+  "postCreateCommand": "apt-get update && apt-get install -y nodejs npm && python -m pip install --upgrade pip setuptools wheel && pip install -r backend/requirements.txt && pip install torch --index-url https://download.pytorch.org/whl/cpu",
+  "remoteUser": "vscode"
+}

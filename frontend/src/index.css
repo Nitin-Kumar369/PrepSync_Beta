@@ -9,7 +9,7 @@
 	--muted: #4b5563; 
 	--accent: #2563eb; 
 	--accent-light: #3b82f6; 
-	--border: #e5e7eb; 
+	--border: #d0d7de; /* Updated to GitHub's light border color */
 	--radius: 12px;
 }
 
@@ -39,6 +39,17 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
 	background: #94a3b8;
+}
+
+/* ======================================================== */
+/* LIGHT MODE BORDER OVERRIDES (GitHub Style)               */
+/* ======================================================== */
+
+html:not(.dark) .border-slate-100, 
+html:not(.dark) .border-slate-200,
+html:not(.dark) .border-gray-100,
+html:not(.dark) .border-gray-200 {
+    border-color: #d0d7de !important;
 }
 
 /* ======================================================== */

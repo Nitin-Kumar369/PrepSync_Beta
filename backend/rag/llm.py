@@ -32,7 +32,6 @@ class RAGLLMStub:
 
     def generate_rag_response(self, query: str, retrieved_chunks: List[str], chunk_metadatas: List[Dict], previous_messages: List[Dict] = None) -> Dict:
         prompt = self.build_rag_prompt(query, retrieved_chunks, chunk_metadatas, previous_messages)
-        # Very simple answer: summarize by returning the first chunk + a header
         if retrieved_chunks:
             answer = "Based on the provided textbooks, here is a concise answer:\n\n" + retrieved_chunks[0][:1500]
         else:
@@ -48,22 +47,15 @@ class GeminiLLM:
         self.api_key = api_key
 
     def build_rag_prompt(self, query: str, retrieved_chunks: List[str], chunk_metadatas: List[Dict], previous_messages: List[Dict] = None) -> str:
-        # reuse stub logic for prompt construction
         return RAGLLMStub().build_rag_prompt(query, retrieved_chunks, chunk_metadatas, previous_messages)
 
     def build_rag_messages(self, query: str, retrieved_chunks: List[str], chunk_metadatas: List[Dict], previous_messages: List[Dict] = None) -> List[Dict[str, str]]:
-        """Construct a `messages` array (system + previous messages + user) for Gemini.
-
-        The system message contains retrieved chunks (truncated by settings.rag_max_context_length)
-        and explicit instructions to prefer answering from those chunks.
-        """
-        # Build truncated chunk context
+        """Construct a `messages` array (system + previous messages + user) for Gemini."""
         max_len = getattr(settings, "rag_max_context_length", 4000)
-        parts = ["You are an assistant for answering questions using the retrieved textbook chunks.\nPrefer to use the provided chunks to answer; if not available, answer concisely from your knowledge and state when evidence is missing.\n\n"]
+        parts = ["You are an assistant for answering questions using the retrieved textbook chunks. Format your responses using markdown and LaTeX where appropriate.\nPrefer to use the provided chunks to answer; if not available, answer concisely from your knowledge and state when evidence is missing.\n\n"]
         total = 0
         for i, (chunk, meta) in enumerate(zip(retrieved_chunks, chunk_metadatas), 1):
             snippet = chunk
-            # truncate chunk if adding it would exceed limit
             if total + len(snippet) > max_len:
                 remaining = max_len - total
                 if remaining <= 0:
@@ -77,57 +69,66 @@ class GeminiLLM:
         messages: List[Dict[str, str]] = []
         messages.append({"role": "system", "content": system_content})
 
-        # Append previous chat messages as user/assistant roles if provided
         if previous_messages:
             for pm in previous_messages:
                 role = pm.get("role", "user")
                 content = pm.get("content", "")
                 messages.append({"role": role, "content": content})
 
-        # Finally, the current user query
         messages.append({"role": "user", "content": query})
         return messages
 
     def generate_rag_response(self, query: str, retrieved_chunks: List[str], chunk_metadatas: List[Dict], previous_messages: List[Dict] = None) -> Dict:
         """Generate response using Gemini API REST endpoint with fallback."""
-        # Build messages array for Gemini (converts system+user to Contents format)
         messages = self.build_rag_messages(query, retrieved_chunks, chunk_metadatas, previous_messages)
         
-        # Convert Gemini messages format to Google AI API contents format
         contents = []
+        system_text = ""
+        
         for msg in messages:
-            role = "user" if msg["role"] in ["user", "system"] else "model"
-            contents.append({
-                "role": role,
-                "parts": [{"text": msg["content"]}]
-            })
+            if msg["role"] == "system":
+                system_text += msg["content"] + "\n"
+                continue
+                
+            role = "model" if msg["role"] in ["assistant", "model"] else "user"
+            
+            if contents and contents[-1]["role"] == role:
+                contents[-1]["parts"][0]["text"] += f"\n\n{msg['content']}"
+            else:
+                contents.append({
+                    "role": role,
+                    "parts": [{"text": msg["content"]}]
+                })
+
+        if contents and contents[0]["role"] == "model":
+            contents.pop(0)
 
         payload = {
             "contents": contents,
             "generationConfig": {
                 "temperature": settings.rag_temperature,
-                "maxOutputTokens": 1024
-            },
-            "safetySettings": [
-                {
-                    "category": "HARM_CATEGORY_UNSPECIFIED",
-                    "threshold": "BLOCK_NONE"
-                }
-            ]
+                "maxOutputTokens": 8192 # <--- Increased to prevent cutoff
+            }
         }
+        
+        if system_text:
+            payload["systemInstruction"] = {
+                "parts": [{"text": system_text}]
+            }
 
         try:
-            # Use v1beta REST API endpoint with API key query param
-            model_name = "gemini-2.5-flash"  # Use gemini-2.5-flash for free tier
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
-            headers = {"Content-Type": "application/json"}
+            model_name = "gemini-3.6-flash"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key
+            }
             
             resp = requests.post(url, headers=headers, json=payload, timeout=30)
             resp.raise_for_status()
             
             data = resp.json()
             
-            # Extract answer from Google Gemini API response format
             answer = ""
             if "candidates" in data and len(data["candidates"]) > 0:
                 candidate = data["candidates"][0]
@@ -135,7 +136,6 @@ class GeminiLLM:
                     if len(candidate["content"]["parts"]) > 0:
                         answer = candidate["content"]["parts"][0].get("text", "")
             
-            # Extract token usage if available
             usage = None
             if "usageMetadata" in data:
                 usage = {
@@ -157,17 +157,15 @@ class GeminiLLM:
             fallback["error_source"] = "gemini_timeout"
             return fallback
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 429:
-                logger.warning("Gemini API rate limited, falling back to stub")
-            else:
-                logger.error(f"Gemini API HTTP error {e.response.status_code}: {str(e)}")
+            error_details = e.response.text if hasattr(e, 'response') and e.response is not None else "No details"
+            logger.error(f"Gemini API HTTP error {e.response.status_code if hasattr(e, 'response') else 'Unknown'}: {error_details}")
+            
             stub = RAGLLMStub()
             fallback = stub.generate_rag_response(query, retrieved_chunks, chunk_metadatas, previous_messages)
-            fallback["error_source"] = "gemini_http_error"
+            fallback["error_source"] = f"gemini_http_error_{e.response.status_code if hasattr(e, 'response') else 'unknown'}"
             return fallback
         except Exception as e:
-            logger.error(f"Gemini API call failed: {str(e)}")
-            # Fallback to the stub implementation
+            logger.error(f"Gemini API call failed: {type(e).__name__}")
             stub = RAGLLMStub()
             fallback = stub.generate_rag_response(query, retrieved_chunks, chunk_metadatas, previous_messages)
             fallback["error_source"] = "gemini_exception"
@@ -176,9 +174,7 @@ class GeminiLLM:
 
 _instance: Optional[object] = None
 
-
 def get_rag_pipeline() -> object:
-    """Return singleton pipeline; choose GeminiLLM when key present."""
     global _instance
     if _instance is None:
         if settings.gemini_api_key:
@@ -189,14 +185,9 @@ def get_rag_pipeline() -> object:
             logger.info("RAG LLM stub initialized (no Gemini API key)")
     return _instance
 
-
 def reset_rag_pipeline():
-    """Clear cached pipeline so next call recreates based on current settings."""
     global _instance
     _instance = None
 
-
 def init_rag_pipeline():
     get_rag_pipeline()
-    # initialization logging happens within getter
-

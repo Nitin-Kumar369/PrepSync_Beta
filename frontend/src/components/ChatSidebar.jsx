@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import API from '../store/authStore'
 import { Plus, X, MessageSquare, Trash2, ArrowLeft } from 'lucide-react'
 
-export default function ChatSidebar({ isOpen, onClose, onSelectChat, currentChatId, bookId }) {
+export default function ChatSidebar({ isOpen, onClose, onSelectChat, currentChatId, bookId, refreshTrigger }) {
   const [chats, setChats] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -14,7 +14,7 @@ export default function ChatSidebar({ isOpen, onClose, onSelectChat, currentChat
         fetchChats()
       }
     }
-  }, [isOpen, bookId])
+  }, [isOpen, bookId, refreshTrigger])
 
   const fetchChats = async () => {
     if (!bookId) return

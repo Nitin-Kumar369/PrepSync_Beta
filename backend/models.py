@@ -137,6 +137,7 @@ class ChatHistoryItem(BaseModel):
     created_at: datetime
     updated_at: datetime
     message_count: int
+    book_id: Optional[str] = None
 
 
 class ChatHistoryResponse(BaseModel):

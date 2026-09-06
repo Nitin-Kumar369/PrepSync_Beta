@@ -306,17 +306,8 @@ async def send_chat_query_for_book(
     
     NEW ENDPOINT: Chat queries must now specify the book_code in the URL path.
     This replaces the generic POST /chat endpoint.
-    
-    Args:
-        book_code: The book ID to chat about (in URL path)
-        request: ChatQueryRequest with query and optional session/chat IDs
-        current_user: Authenticated user from JWT
-        
-    Returns:
-        ChatQueryResponse with response and sources
     """
     try:
-        # Use book_code from path, override request.book_id if provided
         request.book_id = book_code
         
         return await _process_chat_query(
@@ -346,8 +337,6 @@ async def list_book_chats(
 ):
     """
     List all chats for a specific book.
-    
-    NEW ENDPOINT: List chats scoped to a specific book.
     """
     try:
         user_id = current_user.get("user_id")
@@ -355,7 +344,6 @@ async def list_book_chats(
 
         try:
             db = get_db()
-            # Find chats for this user and book
             chats_cursor = db["chats"].find(
                 {"user_id": ObjectId(user_id), "book_id": book_code}
             ).skip(offset).limit(limit).sort("updated_at", -1)
@@ -377,7 +365,8 @@ async def list_book_chats(
                     last_message=last_message,
                     created_at=chat["created_at"],
                     updated_at=chat["updated_at"],
-                    message_count=len(chat.get("messages", []))
+                    message_count=len(chat.get("messages", [])),
+                    book_id=chat.get("book_id")
                 ))
 
             return ChatHistoryResponse(
@@ -405,8 +394,6 @@ async def get_book_chat(
 ):
     """
     Get full chat history for a specific book chat.
-    
-    NEW ENDPOINT: Get a specific chat within a book context.
     """
     try:
         user_id = current_user.get("user_id")
@@ -472,8 +459,6 @@ async def delete_book_chat(
 ):
     """
     Delete a specific book chat.
-    
-    NEW ENDPOINT: Delete a chat scoped to a book.
     """
     try:
         user_id = current_user.get("user_id")
@@ -520,8 +505,6 @@ async def create_book_session(
 ):
     """
     Create a new chat session for a specific book.
-    
-    NEW ENDPOINT: Create a session scoped to a book.
     """
     try:
         logger.info(f"Creating new session for book: {book_code}")
@@ -568,8 +551,6 @@ async def list_book_sessions(
 ):
     """
     List sessions for a specific book.
-    
-    NEW ENDPOINT: List sessions scoped to a book.
     """
     try:
         logger.info(f"Listing sessions for book {book_code}")
@@ -615,8 +596,6 @@ async def get_book_session(
 ):
     """
     Get a specific session for a book.
-    
-    NEW ENDPOINT: Get session scoped to a book.
     """
     try:
         logger.info(f"Retrieving session {session_id} for book {book_code}")
@@ -655,8 +634,6 @@ async def delete_book_session(
 ):
     """
     Delete a session for a book.
-    
-    NEW ENDPOINT: Delete session scoped to a book.
     """
     try:
         logger.info(f"Deleting session {session_id} for book {book_code}")
@@ -689,12 +666,6 @@ async def send_chat_query_legacy(
     request: ChatQueryRequest,
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """
-    DEPRECATED: Send a query to the RAG chatbot (generic).
-    
-    This endpoint is deprecated. Use POST /chat/{book_code} instead.
-    The book_id must be specified in the request body.
-    """
     logger.warning(f"DEPRECATED: Using generic /chat endpoint. Use POST /chat/{{book_code}} instead.")
     
     if not request.book_id:
@@ -718,12 +689,8 @@ async def list_user_chats_legacy(
     current_user: dict = Depends(get_current_user_dep)
 ):
     """
-    DEPRECATED: List all chats for current user (all books).
-    
-    This endpoint is deprecated. Use GET /chat/{book_code}/chats instead.
+    List all chats for current user (all books).
     """
-    logger.warning(f"DEPRECATED: Using generic /chat/list endpoint. Use GET /chat/{{book_code}}/chats instead.")
-    
     try:
         user_id = current_user.get("user_id")
         logger.info(f"Listing all chats for user {user_id}")
@@ -751,7 +718,8 @@ async def list_user_chats_legacy(
                     last_message=last_message,
                     created_at=chat["created_at"],
                     updated_at=chat["updated_at"],
-                    message_count=len(chat.get("messages", []))
+                    message_count=len(chat.get("messages", [])),
+                    book_id=chat.get("book_id")
                 ))
 
             return ChatHistoryResponse(
@@ -776,11 +744,6 @@ async def get_chat_history_legacy(
     chat_id: str,
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """
-    DEPRECATED: Get chat history (without book context).
-    
-    This endpoint is deprecated. Use GET /chat/{book_code}/chats/{chat_id} instead.
-    """
     logger.warning(f"DEPRECATED: Using generic /chat/{{chat_id}} endpoint. Use GET /chat/{{book_code}}/chats/{{chat_id}} instead.")
     
     try:
@@ -840,11 +803,6 @@ async def delete_chat_legacy(
     chat_id: str,
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """
-    DEPRECATED: Delete a chat (without book context).
-    
-    This endpoint is deprecated. Use DELETE /chat/{book_code}/chats/{chat_id} instead.
-    """
     logger.warning(f"DEPRECATED: Using generic /chat/{{chat_id}} delete endpoint. Use DELETE /chat/{{book_code}}/chats/{{chat_id}} instead.")
     
     try:
@@ -886,11 +844,6 @@ async def create_session_legacy(
     title: str = "",
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """
-    DEPRECATED: Create a new chat session.
-    
-    This endpoint is deprecated. Use POST /chat/{book_code}/sessions instead.
-    """
     logger.warning(f"DEPRECATED: Using generic /chat/sessions endpoint. Use POST /chat/{{book_code}}/sessions instead.")
     
     if not book_id:
@@ -939,11 +892,6 @@ async def list_sessions_legacy(
     offset: int = 0,
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """
-    DEPRECATED: List sessions for current user.
-    
-    This endpoint is deprecated. Use GET /chat/{book_code}/sessions instead.
-    """
     logger.warning(f"DEPRECATED: Using generic /chat/sessions endpoint. Use GET /chat/{{book_code}}/sessions instead.")
     
     try:
@@ -991,11 +939,6 @@ async def get_session_legacy(
     session_id: str,
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """
-    DEPRECATED: Get a specific session.
-    
-    This endpoint is deprecated. Use GET /chat/{book_code}/sessions/{session_id} instead.
-    """
     logger.warning(f"DEPRECATED: Using generic /chat/sessions/{{session_id}} endpoint.")
     
     try:
@@ -1027,11 +970,6 @@ async def delete_session_legacy(
     session_id: str,
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """
-    DEPRECATED: Delete a session.
-    
-    This endpoint is deprecated. Use DELETE /chat/{book_code}/sessions/{session_id} instead.
-    """
     logger.warning(f"DEPRECATED: Using generic /chat/sessions/{{session_id}} delete endpoint.")
     
     try:

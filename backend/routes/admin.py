@@ -19,6 +19,7 @@ from error_handlers import ValidationAppError, DatabaseError
 from bson import ObjectId
 from datetime import datetime
 import os
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -420,7 +421,8 @@ async def delete_book(book_id: str, admin: dict = Depends(get_current_admin)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
         # delete file
         try:
-            os.remove(book.get("file_path"))
+            if book.get("file_path") and os.path.exists(book.get("file_path")):
+                os.remove(book.get("file_path"))
         except FileNotFoundError:
             pass
         # delete vector chunks
@@ -433,6 +435,90 @@ async def delete_book(book_id: str, admin: dict = Depends(get_current_admin)):
     except Exception as e:
         logger.error(f"Delete book error: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete book")
+
+
+@router.post("/book/{book_id}/copy")
+async def copy_book(
+    book_id: str,
+    background_tasks: BackgroundTasks,
+    target_department: str = Form(...),
+    target_year: str = Form(...),
+    target_subject: str = Form(...),
+    admin: dict = Depends(get_current_admin)
+):
+    """Copy an existing book to a new department/year/subject location."""
+    try:
+        book = BookModel.find_by_book_id(book_id)
+        if not book:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original book not found")
+        
+        new_book_id = generate_book_id(target_department, target_subject)
+        orig_path = book.get("file_path")
+        
+        dir_path = os.path.join(os.getcwd(), "uploads", target_department, target_year, target_subject)
+        os.makedirs(dir_path, exist_ok=True)
+        new_path = os.path.join(dir_path, f"{new_book_id}.pdf")
+        
+        if orig_path and os.path.exists(orig_path):
+            shutil.copy2(orig_path, new_path)
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original PDF file missing")
+
+        # Create categories if missing
+        try: CategoryModel.create_department(target_department)
+        except: pass
+        try: CategoryModel.add_year(target_department, target_year)
+        except: pass
+        try: CategoryModel.add_subject(target_department, target_year, target_subject)
+        except: pass
+
+        new_book = BookModel.create(
+            book_id=new_book_id,
+            title=f"{book.get('title')} (Copy)",
+            department=target_department,
+            year_of_study=target_year,
+            subject=target_subject,
+            file_path=new_path,
+            status="processing",
+            author=book.get("author", ""),
+            isbn=book.get("isbn", "")
+        )
+
+        job_id = generate_book_id("job", target_subject)
+        jobs[job_id] = {"status": "queued", "progress": 0, "book_id": new_book_id}
+        background_tasks.add_task(_process_book_job, job_id, new_book_id, new_path, admin.get("user_id"))
+
+        return {"message": "Book copied and indexing started", "job_id": job_id, "new_book_id": new_book_id}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Copy book error: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to copy book")
+
+
+@router.put("/book/{book_id}")
+async def edit_book(
+    book_id: str,
+    title: str = Form(...),
+    author: str = Form(""),
+    admin: dict = Depends(get_current_admin)
+):
+    """Edit metadata (title, author) of an existing book."""
+    try:
+        db = get_db()
+        result = db[BookModel.collection_name].update_one(
+            {"book_id": book_id},
+            {"$set": {"title": title, "author": author}}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+        return {"message": "Book updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Edit book error: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update book")
 
 
 @router.get("/books")
@@ -790,4 +876,3 @@ def _rebuild_book_vectors_task(job_id: str, book_id: str):
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["message"] = str(e)
         logger.error(f"Job {job_id}: Error during rebuild: {str(e)}")
-

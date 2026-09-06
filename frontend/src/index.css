@@ -3,13 +3,13 @@
 @tailwind utilities;
 
 :root {
-	--bg: #0f0f23;
-	--card: #1a1a3a;
-	--text-primary: #e8eaed;
-	--muted: #999aac;
-	--accent: #0066cc;
-	--accent-light: #3385dd;
-	--border: #333355;
+	--bg: #f8fafc; /* Light gray-blue background */
+	--card: #ffffff;
+	--text-primary: #111827; /* Dark text for legibility */
+	--muted: #4b5563; /* Gray-600 */
+	--accent: #2563eb; /* Blue-600 */
+	--accent-light: #3b82f6; /* Blue-500 */
+	--border: #e5e7eb; /* Gray-200 */
 	--radius: 12px;
 }
 
@@ -29,14 +29,14 @@ body {
 .card {
 	background: var(--card);
 	border-radius: var(--radius);
-	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 	border: 1px solid var(--border);
-	transition: all 0.3s ease;
+	transition: all 0.2s ease;
 }
 
 .card:hover {
-	box-shadow: 0 8px 30px rgba(0, 102, 204, 0.15);
-	border-color: var(--accent);
+	box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+	border-color: var(--accent-light);
 }
 
 /* Small helpers */
@@ -50,16 +50,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-	background: var(--card);
+	background: var(--bg);
 }
 
 ::-webkit-scrollbar-thumb {
-	background: var(--accent);
+	background: #cbd5e1;
 	border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-	background: var(--accent-light);
+	background: #94a3b8;
 }
 
 /* Input styling */
@@ -75,5 +75,6 @@ input::placeholder, textarea::placeholder {
 
 input:focus, textarea:focus, select:focus {
 	border-color: var(--accent) !important;
-	box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1) !important;
+	box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+	outline: none !important;
 }

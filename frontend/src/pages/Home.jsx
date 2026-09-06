@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore'
 import { Link } from 'react-router-dom'
 import API from '../store/authStore'
 import { Button, Card, Alert, LoadingSpinner } from '../components/UI'
+import { BookOpen, MessageSquare, Zap, Library, ArrowRight, BookX } from 'lucide-react'
 
 export default function Home() {
   const { user } = useAuthStore()
@@ -30,83 +31,82 @@ export default function Home() {
   }, [])
 
   return (
-    <main className='min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50'>
-      <div className='max-w-7xl mx-auto px-4 py-12'>
+    <main className='min-h-screen bg-white'>
+      <div className='max-w-6xl mx-auto px-6 py-16 md:py-24'>
         {/* Hero Section */}
-        <section className='grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-16'>
-          <div className='space-y-6'>
-            <div>
-              <h1 className='text-5xl font-bold text-gray-900 mb-4'>
-                PrepSync <span className='text-blue-600'>RAG</span>
-              </h1>
-              <p className='text-xl text-gray-600 leading-relaxed'>
-                Access engineering textbooks and learn with an AI-powered chatbot. Get instant, contextual answers grounded in real textbook content.
-              </p>
-            </div>
+        <section className='flex flex-col md:flex-row gap-16 items-center mb-24'>
+          <div className='flex-1 space-y-8'>
+            <h1 className='text-5xl md:text-6xl font-bold text-slate-900 tracking-tight leading-tight'>
+              Your library, <br/>
+              <span className='text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600'>
+                powered by AI.
+              </span>
+            </h1>
+            <p className='text-lg md:text-xl text-slate-600 leading-relaxed max-w-lg'>
+              Access engineering textbooks and learn faster. Get instant, contextual answers grounded purely in real textbook content.
+            </p>
 
             {!user ? (
-              <Card className='border-blue-200 bg-blue-50'>
-                <h2 className='text-2xl font-semibold text-gray-900 mb-3'>Get Started</h2>
-                <p className='text-gray-700 mb-6'>Join our community of learners and start exploring textbooks with AI assistance.</p>
-                <div className='flex flex-col sm:flex-row gap-3'>
-                  <Link to='/signup' className='flex-1'>
-                    <Button size='lg' className='w-full'>Sign Up</Button>
-                  </Link>
-                  <Link to='/login' className='flex-1'>
-                    <Button variant='outline' size='lg' className='w-full'>Log In</Button>
-                  </Link>
-                </div>
-              </Card>
-            ) : (
-              <Card className='border-green-200 bg-green-50'>
-                <h2 className='text-2xl font-semibold text-gray-900 mb-2'>
-                  Welcome, {user.full_name || user.email}!
-                </h2>
-                <p className='text-gray-700 mb-6'>Ready to explore engineering textbooks? Start browsing our collection and chat with AI.</p>
-                <Link to='/browse'>
-                  <Button size='lg'>Browse Books →</Button>
+              <div className='flex flex-col sm:flex-row gap-4 pt-4'>
+                <Link to='/signup'>
+                  <Button size='lg' className='w-full sm:w-auto rounded-full px-8 py-3 text-base shadow-sm hover:shadow-md transition-all'>
+                    Get Started
+                  </Button>
                 </Link>
-              </Card>
+                <Link to='/login'>
+                  <Button variant='secondary' size='lg' className='w-full sm:w-auto rounded-full px-8 py-3 text-base border-slate-200 hover:bg-slate-50 transition-all'>
+                    Log In
+                  </Button>
+                </Link>
+              </div>
+            ) : (
+              <div className='pt-4'>
+                <Link to='/browse'>
+                  <Button size='lg' className='rounded-full px-8 py-3 text-base shadow-sm flex items-center gap-2'>
+                    Browse Library <ArrowRight className="w-5 h-5" />
+                  </Button>
+                </Link>
+              </div>
             )}
           </div>
 
-          {/* Features */}
-          <div className='space-y-4'>
-            <Card className='hover:shadow-md transition-shadow'>
-              <div className='flex gap-4'>
-                <div className='text-3xl font-semibold text-blue-600'>1</div>
-                <div>
-                  <h3 className='text-lg font-semibold text-gray-900 mb-1'>Explore</h3>
-                  <p className='text-gray-600'>Browse books by department, year, and subject</p>
-                </div>
+          {/* Feature Highlights */}
+          <div className='flex-1 w-full space-y-4'>
+            <div className='bg-slate-50 p-6 rounded-3xl border border-slate-100 flex gap-5 items-start'>
+              <div className='bg-blue-100 p-3 rounded-2xl text-blue-600 shrink-0'>
+                <Library className="w-6 h-6" />
               </div>
-            </Card>
-            <Card className='hover:shadow-md transition-shadow'>
-              <div className='flex gap-4'>
-                <div className='text-3xl font-semibold text-blue-600'>2</div>
-                <div>
-                  <h3 className='text-lg font-semibold text-gray-900 mb-1'>Ask Questions</h3>
-                  <p className='text-gray-600'>Chat with an AI trained on textbook content</p>
-                </div>
+              <div>
+                <h3 className='text-lg font-semibold text-slate-900 mb-1'>Explore the Library</h3>
+                <p className='text-slate-600 leading-relaxed'>Browse books seamlessly by department, academic year, and subject.</p>
               </div>
-            </Card>
-            <Card className='hover:shadow-md transition-shadow'>
-              <div className='flex gap-4'>
-                <div className='text-3xl font-semibold text-blue-600'>3</div>
-                <div>
-                  <h3 className='text-lg font-semibold text-gray-900 mb-1'>Learn Faster</h3>
-                  <p className='text-gray-600'>Get answers grounded in actual textbook passages</p>
-                </div>
+            </div>
+            <div className='bg-slate-50 p-6 rounded-3xl border border-slate-100 flex gap-5 items-start'>
+              <div className='bg-indigo-100 p-3 rounded-2xl text-indigo-600 shrink-0'>
+                <MessageSquare className="w-6 h-6" />
               </div>
-            </Card>
+              <div>
+                <h3 className='text-lg font-semibold text-slate-900 mb-1'>Ask Questions</h3>
+                <p className='text-slate-600 leading-relaxed'>Chat directly with a responsive AI trained on your specific textbook's context.</p>
+              </div>
+            </div>
+            <div className='bg-slate-50 p-6 rounded-3xl border border-slate-100 flex gap-5 items-start'>
+              <div className='bg-emerald-100 p-3 rounded-2xl text-emerald-600 shrink-0'>
+                <Zap className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className='text-lg font-semibold text-slate-900 mb-1'>Learn Faster</h3>
+                <p className='text-slate-600 leading-relaxed'>Get highly accurate answers backed by cited passages directly from the text.</p>
+              </div>
+            </div>
           </div>
         </section>
 
         {/* Departments Section */}
-        <section className='border-t border-gray-200 pt-16'>
-          <div className='mb-8'>
-            <h2 className='text-4xl font-bold text-gray-900 mb-2'>Available Departments</h2>
-            <p className='text-lg text-gray-600'>Select a department to start exploring</p>
+        <section className='pt-8'>
+          <div className='mb-10'>
+            <h2 className='text-3xl font-bold text-slate-900 mb-3'>Available Departments</h2>
+            <p className='text-slate-600'>Select a discipline to start exploring resources.</p>
           </div>
 
           {error && (
@@ -130,19 +130,23 @@ export default function Home() {
                 >
                   <Card 
                     hoverable
-                    className='h-full border-2 border-transparent hover:border-blue-300'
+                    className='h-full border border-slate-200 hover:border-blue-300 rounded-3xl p-2 transition-all shadow-sm hover:shadow-md'
                   >
-                    <div className='flex flex-col h-full justify-between'>
-                      <h3 className='text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2'>
-                        <span className='text-2xl'>📖</span>
-                        {dept}
-                      </h3>
-                      <p className='text-gray-600 text-sm mb-6 flex-grow'>
-                        Explore textbooks and chat with AI-powered assistance
+                    <div className='flex flex-col h-full'>
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="bg-slate-100 p-3 rounded-2xl text-slate-700">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                        <h3 className='text-xl font-bold text-slate-900 leading-tight'>
+                          {dept}
+                        </h3>
+                      </div>
+                      <p className='text-slate-600 text-sm mb-6 flex-grow leading-relaxed px-1'>
+                        Explore textbooks and chat with AI-powered assistance dedicated to {dept}.
                       </p>
-                      <Button variant='primary' size='sm' className='w-full'>
-                        Browse Books →
-                      </Button>
+                      <div className="text-blue-600 font-semibold text-sm flex items-center gap-1 px-1">
+                        Browse Books <ArrowRight className="w-4 h-4" />
+                      </div>
                     </div>
                   </Card>
                 </Link>
@@ -151,10 +155,13 @@ export default function Home() {
           )}
 
           {!loading && departments.length === 0 && !error && (
-            <Card className='text-center py-12 border-2 border-dashed border-gray-300'>
-              <p className='text-lg text-gray-600 mb-2'>📭 No departments available</p>
-              <p className='text-sm text-gray-500'>Please check back later or contact an administrator</p>
-            </Card>
+            <div className='text-center py-16 bg-slate-50 rounded-3xl border border-slate-200'>
+              <div className="flex justify-center mb-4 text-slate-400">
+                <BookX className="w-12 h-12" />
+              </div>
+              <p className='text-lg font-medium text-slate-900 mb-1'>No departments available</p>
+              <p className='text-sm text-slate-500'>Please check back later or contact an administrator.</p>
+            </div>
           )}
         </section>
       </div>

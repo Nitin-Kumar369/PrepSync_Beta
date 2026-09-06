@@ -1,6 +1,7 @@
 ﻿import React, { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
+import { useThemeStore } from './store/themeStore'
 import NavBar from './components/NavBar'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -26,9 +27,11 @@ function AdminRoute({ children }) {
 
 export default function App() {
   const { init } = useAuthStore()
+  const { initTheme } = useThemeStore()
 
   useEffect(() => {
     init()
+    initTheme() // Bootstrap Dark Mode
   }, [])
 
   return (
@@ -49,4 +52,3 @@ export default function App() {
     </div>
   )
 }
-

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import API from '../store/authStore'
-import { Button, Input, Modal } from '../components/UI'
+import { Button, Input, Modal, Skeleton } from '../components/UI'
 import { Folder, FolderOpen, BookOpen, Book, Plus, Trash2, Edit, Copy, Upload } from 'lucide-react'
 
 export default function Admin() {
@@ -356,7 +356,14 @@ export default function Admin() {
         {activeTab === 'stats' && (
           <div>
             {statsLoading ? (
-              <div className="text-center py-8 text-slate-500">Loading statistics...</div>
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                 {[1, 2, 3, 4, 5, 6].map(i => (
+                   <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200">
+                     <Skeleton className="w-24 h-4 mb-3 text" />
+                     <Skeleton className="w-16 h-8 text" />
+                   </div>
+                 ))}
+               </div>
             ) : stats ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -411,7 +418,24 @@ export default function Admin() {
             </div>
 
             {usersLoading ? (
-              <div className="text-center py-8 text-slate-500">Loading users...</div>
+               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                 <table className="w-full text-sm text-left text-slate-600">
+                   <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs border-b border-slate-200">
+                     <tr><th className="px-6 py-4">Email</th><th className="px-6 py-4">Name</th><th className="px-6 py-4">Role</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Actions</th></tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-100">
+                     {[1, 2, 3, 4, 5].map(i => (
+                       <tr key={i}>
+                         <td className="px-6 py-4"><Skeleton className="w-40 h-4 text" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-32 h-4 text" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-16 h-4 text" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-16 h-6 rounded-full" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-32 h-4 text" /></td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
             ) : users.length === 0 ? (
               <div className="text-center py-8 text-slate-500">No users found</div>
             ) : (
@@ -478,7 +502,25 @@ export default function Admin() {
             </div>
 
             {booksLoading ? (
-              <div className="text-center py-8 text-slate-500">Loading books...</div>
+               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                 <table className="w-full text-sm text-left text-slate-600">
+                   <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs border-b border-slate-200">
+                     <tr><th className="px-6 py-4">Title</th><th className="px-6 py-4">Author</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Chunks</th><th className="px-6 py-4">Size (MB)</th><th className="px-6 py-4">Actions</th></tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-100">
+                     {[1, 2, 3, 4, 5].map(i => (
+                       <tr key={i}>
+                         <td className="px-6 py-4"><Skeleton className="w-48 h-4 text" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-24 h-4 text" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-16 h-6 rounded-full" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-10 h-4 text" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-10 h-4 text" /></td>
+                         <td className="px-6 py-4"><Skeleton className="w-16 h-4 text" /></td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
             ) : books.length === 0 ? (
               <div className="text-center py-8 text-slate-500">No books found</div>
             ) : (
@@ -733,7 +775,6 @@ export default function Admin() {
         )}
 
         {/* MODALS */}
-        {/* Upload Book Modal */}
         <Modal isOpen={!!uploadModal} onClose={() => { setUploadModal(null); setUploadFile(null); }} title="Upload Book to Subject">
           <div className="space-y-5">
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm text-slate-600">
@@ -754,7 +795,6 @@ export default function Admin() {
           </div>
         </Modal>
 
-        {/* Edit Book Modal */}
         <Modal isOpen={!!editBookModal} onClose={() => setEditBookModal(null)} title="Edit Book Metadata">
           <div className="space-y-5">
             <Input label="Title *" value={editData.title} onChange={e => setEditData(p => ({...p, title: e.target.value}))} />
@@ -766,7 +806,6 @@ export default function Admin() {
           </div>
         </Modal>
 
-        {/* Copy Book Modal */}
         <Modal isOpen={!!copyModal} onClose={() => setCopyModal(null)} title="Copy Book">
           <div className="space-y-5">
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">

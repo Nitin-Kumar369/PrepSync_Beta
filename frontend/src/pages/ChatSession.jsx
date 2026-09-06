@@ -84,26 +84,13 @@ export default function ChatSession() {
   }
 
   const fetchBooks = async () => {
-    try {
-      const res = await API.get('/books/departments')
-      const depts = res.data.departments || []
-      const booksForAll = []
-      
-      for (const dept of depts) {
-        const yearsRes = await API.get(`/books/departments/${encodeURIComponent(dept)}/years`)
-        for (const year of yearsRes.data.years || []) {
-          const subjRes = await API.get(`/books/departments/${encodeURIComponent(dept)}/years/${encodeURIComponent(year)}/subjects`)
-          for (const subj of subjRes.data.subjects || []) {
-            const bookRes = await API.get(`/books/departments/${encodeURIComponent(dept)}/years/${encodeURIComponent(year)}/subjects/${encodeURIComponent(subj)}`)
-            booksForAll.push(...(bookRes.data.books || []))
-          }
-        }
-      }
-      setAvailableBooks(booksForAll)
-    } catch (e) {
-      console.error('Failed to fetch books:', e)
-    }
+  try {
+    const res = await API.get('/books/all')
+    setAvailableBooks(res.data.books || [])
+  } catch (e) {
+    console.error('Failed to fetch books:', e)
   }
+}
 
   const handleSelectBook = (selectedBook) => {
     if (selectedBook.book_id === bookId) return

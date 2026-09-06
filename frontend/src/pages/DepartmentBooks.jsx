@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import API from '../store/authStore'
 import { useAuthStore } from '../store/authStore'
+import { Skeleton } from '../components/UI'
 import { ArrowLeft, BookOpen, Library, FileText, Layers } from 'lucide-react'
 
 export default function DepartmentBooks() {
@@ -96,6 +97,15 @@ export default function DepartmentBooks() {
           </div>
         )}
 
+        {loading && years.length === 0 && (
+          <section className='mb-12'>
+            <Skeleton className="w-32 h-6 mb-4" />
+            <div className='flex flex-wrap gap-3'>
+               {[1, 2, 3, 4].map(i => <Skeleton key={i} className="w-28 h-12 rounded-2xl" />)}
+            </div>
+          </section>
+        )}
+
         {years.length > 0 && (
           <section className='mb-12'>
             <h2 className='text-lg font-bold mb-4 text-slate-400 tracking-wider uppercase'>Select Year</h2>
@@ -117,53 +127,87 @@ export default function DepartmentBooks() {
           </section>
         )}
 
-        {selectedYear && subjects.length > 0 && (
+        {selectedYear && (
           <section>
             <h2 className='text-lg font-bold mb-6 text-slate-400 tracking-wider uppercase'>Choose Subject</h2>
-            <div className='grid grid-cols-1 gap-6'>
-              {subjects.map((subject) => (
-                <div
-                  key={subject}
-                  className='bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer'
-                  onClick={() => fetchBooksForSubject(subject)}
-                >
-                  <div className="flex items-center gap-3 mb-6">
-                    <BookOpen className="w-6 h-6 text-blue-600" />
-                    <h3 className='text-2xl font-bold text-slate-900'>{subject}</h3>
-                  </div>
+            
+            {loading && subjects.length === 0 ? (
+               <div className="grid grid-cols-1 gap-6">
+                 {[1, 2].map(i => (
+                   <div key={i} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                      <div className="flex items-center gap-3 mb-6">
+                         <Skeleton className="w-6 h-6 circular" />
+                         <Skeleton className="w-48 h-8" />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                         {[1, 2, 3].map(j => (
+                           <div key={j} className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                             <Skeleton className="w-3/4 h-6 mb-2" />
+                             <Skeleton className="w-1/2 h-4 mb-4" />
+                             <div className="flex gap-4 pt-4 border-t border-slate-200">
+                               <Skeleton className="w-16 h-4" />
+                               <Skeleton className="w-16 h-4" />
+                             </div>
+                           </div>
+                         ))}
+                      </div>
+                   </div>
+                 ))}
+               </div>
+            ) : (
+              <div className='grid grid-cols-1 gap-6'>
+                {subjects.map((subject) => (
+                  <div
+                    key={subject}
+                    className='bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer'
+                    onClick={() => fetchBooksForSubject(subject)}
+                  >
+                    <div className="flex items-center gap-3 mb-6">
+                      <BookOpen className="w-6 h-6 text-blue-600" />
+                      <h3 className='text-2xl font-bold text-slate-900'>{subject}</h3>
+                    </div>
 
-                  {loading ? (
-                    <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-                      <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
-                      Loading...
-                    </div>
-                  ) : books.length > 0 && books[0].subject === subject ? (
-                    <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5'>
-                      {books.map((book) => (
-                        <div
-                          key={book.book_id}
-                          className='bg-slate-50 p-5 rounded-2xl border border-slate-200 hover:border-blue-500 hover:shadow-lg transition-all cursor-pointer group flex flex-col'
-                          onClick={(e) => { e.stopPropagation(); handleBookClick(book.book_id); }}
-                        >
-                          <h4 className='font-bold text-slate-900 text-lg mb-2 leading-tight group-hover:text-blue-700 transition-colors'>{book.title}</h4>
-                          <p className='text-sm text-slate-500 mb-4 flex-grow'>{book.author || 'Unknown Author'}</p>
-                          
-                          <div className='flex gap-4 pt-4 border-t border-slate-200 text-xs text-slate-400 font-semibold'>
-                            <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5"/> {book.total_pages || '?'} pages</span>
-                            <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5"/> {book.total_chunks || '0'} chunks</span>
+                    {loading && books.length === 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
+                        {[1, 2, 3].map(j => (
+                          <div key={j} className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                            <Skeleton className="w-3/4 h-6 mb-2" />
+                            <Skeleton className="w-1/2 h-4 mb-4" />
+                            <div className="flex gap-4 pt-4 border-t border-slate-200">
+                              <Skeleton className="w-16 h-4" />
+                              <Skeleton className="w-16 h-4" />
+                            </div>
                           </div>
-                          {!user && (
-                            <p className='text-xs text-blue-600 font-bold mt-4 bg-blue-50 py-2 px-3 rounded-lg text-center'>Click to login and chat</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className='text-sm text-slate-500 font-medium'>Click to expand resources in this subject</p>
-                  )}
-                </div>
-              ))}
-            </div>
+                        ))}
+                      </div>
+                    ) : books.length > 0 && books[0].subject === subject ? (
+                      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5'>
+                        {books.map((book) => (
+                          <div
+                            key={book.book_id}
+                            className='bg-slate-50 p-5 rounded-2xl border border-slate-200 hover:border-blue-500 hover:shadow-lg transition-all cursor-pointer group flex flex-col'
+                            onClick={(e) => { e.stopPropagation(); handleBookClick(book.book_id); }}
+                          >
+                            <h4 className='font-bold text-slate-900 text-lg mb-2 leading-tight group-hover:text-blue-700 transition-colors'>{book.title}</h4>
+                            <p className='text-sm text-slate-500 mb-4 flex-grow'>{book.author || 'Unknown Author'}</p>
+                            
+                            <div className='flex gap-4 pt-4 border-t border-slate-200 text-xs text-slate-400 font-semibold'>
+                              <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5"/> {book.total_pages || '?'} pages</span>
+                              <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5"/> {book.total_chunks || '0'} chunks</span>
+                            </div>
+                            {!user && (
+                              <p className='text-xs text-blue-600 font-bold mt-4 bg-blue-50 py-2 px-3 rounded-lg text-center'>Click to login and chat</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className='text-sm text-slate-500 font-medium'>Click to expand resources in this subject</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
 

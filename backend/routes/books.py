@@ -123,6 +123,31 @@ async def get_books_by_filters(
         logger.error(f"❌ Error fetching books: {str(e)}")
         raise DatabaseError("books_fetch", f"Failed to retrieve books for {department}/{year}/{subject}", e)
 
+@router.get("/all")
+async def get_all_indexed_books():
+    """Fetch all indexed books in a single fast query without hierarchy recursion."""
+    try:
+        books = BookModel.find_all()
+        indexed_books = [
+            {
+                "book_id": b.get("book_id"),
+                "title": b.get("title") or b.get("book_id"),
+                "author": b.get("author", ""),
+                "department": b.get("department", ""),
+                "year_of_study": b.get("year_of_study", ""),
+                "subject": b.get("subject", ""),
+                "total_pages": b.get("total_pages"),
+                "total_chunks": b.get("total_chunks", 0),
+                "status": b.get("status"),
+                "indexed_date": b.get("indexed_date")
+            }
+            for b in books
+            if b.get("status") == "indexed"
+        ]
+        return {"books": indexed_books}
+    except Exception as e:
+        logger.error(f"Error fetching all books: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch books")
 
 @router.get("/{book_id}")
 async def get_book_details(book_id: str, current_user: dict = Depends(get_current_user_optional_no_scheme)):
@@ -158,3 +183,4 @@ async def get_book_details(book_id: str, current_user: dict = Depends(get_curren
     except Exception as e:
         logger.error(f"❌ Error fetching book details: {str(e)}")
         raise DatabaseError("book_details_fetch", f"Failed to retrieve book {book_id}", e)
+

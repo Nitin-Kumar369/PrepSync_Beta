@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import API from '../store/authStore'
-import Button from '../components/UI/Button'
+import { Button, Skeleton } from '../components/UI'
 import { User, History, Trash2, Settings, Clock, MessageSquare, Play } from 'lucide-react'
 
 export default function Account() {
@@ -47,7 +47,6 @@ export default function Account() {
     }
   }
 
-  // Fetch all chats globally via the list endpoint
   const fetchRecentChats = async () => {
     setChatsLoading(true)
     try {
@@ -68,7 +67,6 @@ export default function Account() {
   const handleSaveProfile = async () => {
     setError(null)
     setSuccess(null)
-    
     try {
       await API.put('/auth/profile', {
         full_name: formData.full_name,
@@ -77,7 +75,6 @@ export default function Account() {
         current_password: formData.current_password,
         new_password: formData.new_password || null
       })
-      
       setSuccess('Profile updated successfully')
       setEditMode(false)
       setFormData(prev => ({ ...prev, current_password: '', new_password: '' }))
@@ -89,7 +86,6 @@ export default function Account() {
 
   const handleDeleteChat = async (chatId) => {
     if (!window.confirm('Delete this chat history?')) return
-    
     try {
       await API.delete(`/chat/${chatId}`)
       setChats(prev => prev.filter(c => c.chat_id !== chatId))
@@ -100,8 +96,47 @@ export default function Account() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-32 bg-white min-h-screen">
-        <div className="inline-block h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="bg-white min-h-screen py-12">
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="flex items-center gap-3 mb-10">
+            <Skeleton className="w-14 h-14 rounded-2xl" />
+            <Skeleton className="w-48 h-8" />
+          </div>
+          
+          <div className="bg-slate-50 rounded-3xl border border-slate-100 p-8 mb-10">
+            <div className="flex justify-between items-center mb-8 pb-4 border-b border-slate-200">
+              <Skeleton className="w-40 h-6" />
+              <Skeleton className="w-28 h-10 rounded-full" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-8 gap-x-10">
+              {[1, 2, 3, 4].map(i => (
+                <div key={i}>
+                  <Skeleton className="w-20 h-3 mb-2" />
+                  <Skeleton className="w-48 h-5" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm">
+            <Skeleton className="w-48 h-6 mb-6 pb-4 border-b border-slate-100" />
+            <div className="space-y-4">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="flex justify-between p-5 border border-slate-200 rounded-2xl">
+                  <div className="space-y-2 w-full max-w-sm">
+                    <Skeleton className="w-3/4 h-5" />
+                    <Skeleton className="w-full h-4" />
+                    <Skeleton className="w-1/2 h-3" />
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Skeleton className="w-24 h-10 rounded-xl" />
+                    <Skeleton className="w-10 h-10 rounded-xl" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
@@ -240,7 +275,17 @@ export default function Account() {
           </h2>
 
           {chatsLoading ? (
-            <div className="text-slate-500 py-6 text-center">Loading history...</div>
+            <div className="space-y-4">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="flex justify-between p-5 border border-slate-200 rounded-2xl">
+                  <div className="space-y-2 w-full max-w-sm">
+                    <Skeleton className="w-3/4 h-5" />
+                    <Skeleton className="w-full h-4" />
+                    <Skeleton className="w-1/2 h-3" />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : chats.length === 0 ? (
             <div className="text-slate-500 py-10 bg-slate-50 rounded-2xl text-center border border-dashed border-slate-300">
               No chat history available.

@@ -2,7 +2,7 @@
 import { useAuthStore } from '../store/authStore'
 import { Link } from 'react-router-dom'
 import API from '../store/authStore'
-import { Button, Card, Alert, LoadingSpinner } from '../components/UI'
+import { Button, Card, Alert, Skeleton } from '../components/UI'
 import { BookOpen, MessageSquare, Zap, Library, ArrowRight, BookX } from 'lucide-react'
 
 export default function Home() {
@@ -116,8 +116,20 @@ export default function Home() {
           )}
 
           {loading && (
-            <div className='py-16 flex justify-center'>
-              <LoadingSpinner size='lg' label='Loading departments...' />
+            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <Card key={i} className='h-full border border-slate-200 rounded-3xl p-2'>
+                  <div className='flex flex-col h-full'>
+                    <div className="flex items-center gap-3 mb-4">
+                      <Skeleton className="w-12 h-12 rounded-2xl shrink-0" />
+                      <Skeleton className="h-6 w-32" />
+                    </div>
+                    <Skeleton className="h-4 w-full mb-2" />
+                    <Skeleton className="h-4 w-4/5 mb-6 flex-grow" />
+                    <Skeleton className="h-4 w-24" />
+                  </div>
+                </Card>
+              ))}
             </div>
           )}
 

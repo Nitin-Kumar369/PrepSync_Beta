@@ -1,20 +1,12 @@
-﻿export default {
+﻿/** @type {import('tailwindcss').Config} */
+export default {
+  darkMode: 'class', // Ensures dark: utilities only fire when html.dark is present
   content: [
     "./index.html",
-    "./src/**/*.{js,jsx}",
+    "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {
-      colors: {
-        primary: '#1a1a2e',
-        accent: '#0066cc',
-        muted: '#8b8b9a',
-        surface: '#16213e'
-      },
-      fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui']
-      }
-    }
+    extend: {},
   },
   plugins: [],
 }

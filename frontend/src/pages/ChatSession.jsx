@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import API from '../store/authStore'
 import ChatSidebar from '../components/ChatSidebar'
 import Button from '../components/UI/Button'
 import { useChatStore } from '../store/chatStore'
 import { Menu, ChevronDown, Send, Loader2, BookOpen, MessageSquare } from 'lucide-react'
 
-// --- Markdown & LaTeX Imports ---
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -23,7 +22,7 @@ export default function ChatSession() {
   const bookFromState = location.state?.book
 
   const [book, setBook] = useState(bookFromState || null)
-  const { setCurrentBook, addMessage, clearMessages } = useChatStore()
+  const { setCurrentBook, addMessage } = useChatStore()
   const [query, setQuery] = useState('')
   const [response, setResponse] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -113,7 +112,7 @@ export default function ChatSession() {
             response: backendMessages[i + 1].content,
             timestamp: msg.timestamp
           })
-          i++
+          i++ 
         }
       }
       
@@ -219,32 +218,57 @@ export default function ChatSession() {
     }
   }
 
-  // Common Markdown Components configuration with Table Support
   const MarkdownComponents = {
-    p: ({node, ...props}) => <p className="mb-3 last:mb-0" {...props} />,
-    ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
-    ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
-    li: ({node, ...props}) => <li className="pl-1" {...props} />,
+    p: ({node, ...props}) => <p className="mb-3.5 last:mb-0 leading-relaxed" {...props} />,
+    ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-3.5 space-y-1.5" {...props} />,
+    ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-3.5 space-y-1.5" {...props} />,
+    li: ({node, ...props}) => <li className="pl-1 leading-relaxed" {...props} />,
     h1: ({node, ...props}) => <h1 className="text-xl font-bold mb-3 mt-4" {...props} />,
-    h2: ({node, ...props}) => <h2 className="text-lg font-bold mb-2 mt-4" {...props} />,
+    h2: ({node, ...props}) => <h2 className="text-lg font-bold mb-2.5 mt-4" {...props} />,
     h3: ({node, ...props}) => <h3 className="text-base font-bold mb-2 mt-3" {...props} />,
-    strong: ({node, ...props}) => <strong className="font-semibold text-slate-900 dark:text-slate-100" {...props} />,
-    code: ({node, inline, ...props}) => 
-      inline 
-        ? <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-sm font-mono text-blue-600 dark:text-blue-400" {...props} />
-        : <div className="my-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"><pre className="p-4 overflow-x-auto text-sm font-mono"><code {...props} /></pre></div>,
-    table: ({node, ...props}) => <div className="overflow-x-auto my-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm"><table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700 text-sm" {...props} /></div>,
-    thead: ({node, ...props}) => <thead className="bg-slate-50 dark:bg-slate-800/50" {...props} />,
-    tbody: ({node, ...props}) => <tbody className="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-transparent" {...props} />,
-    tr: ({node, ...props}) => <tr className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/50" {...props} />,
-    th: ({node, ...props}) => <th className="px-4 py-3 text-left font-semibold text-slate-900 dark:text-slate-100" {...props} />,
-    td: ({node, ...props}) => <td className="px-4 py-3 text-slate-700 dark:text-slate-300 align-top" {...props} />,
+    h4: ({node, ...props}) => <h4 className="text-sm font-bold mb-1.5 mt-2.5" {...props} />,
+    strong: ({node, ...props}) => <strong className="font-bold" {...props} />,
+    em: ({node, ...props}) => <em className="italic" {...props} />,
+    hr: ({node, ...props}) => <hr className="my-4 border-slate-200" {...props} />,
+    code: ({ node, className, children, ...props }) => {
+  // A code element is inline if it is directly inside an inline element, or does not contain newlines
+  const isInline = !String(children).includes('\n') && !className?.includes('language-');
+
+  if (isInline) {
+    return (
+      <code 
+        className="px-1.5 py-0.5 mx-0.5 rounded-md font-mono text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 shadow-sm">
+      <pre className="p-3.5 overflow-x-auto text-xs font-mono text-slate-800 leading-relaxed">
+        <code {...props}>{children}</code>
+      </pre>
+    </div>
+  );
+},
+    table: ({node, ...props}) => (
+      <div className="overflow-x-auto my-5 rounded-2xl border border-slate-200 shadow-sm">
+        <table className="min-w-full divide-y divide-slate-200 text-sm" {...props} />
+      </div>
+    ),
+    thead: ({node, ...props}) => <thead className="bg-slate-50" {...props} />,
+    tbody: ({node, ...props}) => <tbody className="divide-y divide-slate-200 bg-white" {...props} />,
+    tr: ({node, ...props}) => <tr className="transition-colors hover:bg-slate-50/70" {...props} />,
+    th: ({node, ...props}) => <th className="px-4 py-3 text-left font-bold" {...props} />,
+    td: ({node, ...props}) => <td className="px-4 py-3 align-top text-slate-700" {...props} />,
   }
 
   if (!book) {
     return (
-      <div className="min-h-[calc(100vh-64px)] bg-white dark:bg-transparent flex items-center justify-center">
-        <div className="text-center bg-white dark:bg-transparent p-8 rounded-3xl">
+      <div className="min-h-[calc(100vh-64px)] bg-white flex items-center justify-center">
+        <div className="text-center p-8 rounded-3xl border border-slate-200 bg-white">
           {error ? (
             <>
               <p className="text-red-600 mb-6 font-medium">{error}</p>
@@ -262,7 +286,7 @@ export default function ChatSession() {
   }
 
   return (
-    <div className='flex h-[calc(100vh-64px)] bg-white dark:bg-transparent overflow-hidden'>
+    <div className='flex h-[calc(100vh-64px)] bg-white overflow-hidden'>
       <ChatSidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -275,21 +299,22 @@ export default function ChatSession() {
         refreshTrigger={refreshSidebar}
       />
 
-      <div className='flex-1 flex flex-col h-full relative'>
-        <div className='bg-white/80 dark:bg-[#1e1e1e]/80 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 p-4 z-10 flex-shrink-0'>
+      <div className='flex-1 flex flex-col h-full relative bg-white'>
+        {/* Top Header */}
+        <div className='bg-white border-b border-slate-200 p-4 z-10 flex-shrink-0'>
           <div className='flex items-center justify-between max-w-4xl mx-auto'>
             <div className='flex items-center gap-3'>
               <button 
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-2 -ml-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors md:hidden"
+                className="p-2 -ml-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full transition-colors md:hidden"
               >
                 <Menu className="w-5 h-5" />
               </button>
               <div>
-                <h1 className='text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2'>
+                <h1 className='text-base md:text-lg font-bold text-slate-900 flex items-center gap-2'>
                   {book.title}
                 </h1>
-                <p className='text-xs font-medium text-slate-400 mt-0.5'>
+                <p className='text-xs font-semibold text-slate-500 mt-0.5'>
                   {book.department}
                 </p>
               </div>
@@ -300,77 +325,86 @@ export default function ChatSession() {
                   setShowBookSelector(!showBookSelector)
                   if (!availableBooks.length) fetchBooks()
                 }}
-                className="px-4 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-full text-sm font-semibold transition flex items-center gap-2 border border-slate-200 dark:border-slate-700"
+                className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-full text-sm font-semibold transition flex items-center gap-2 border border-slate-200 shadow-sm"
               >
                 Change Book <ChevronDown className="w-4 h-4 text-slate-400"/>
               </button>
               {showBookSelector && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl shadow-xl z-50 max-h-80 overflow-y-auto">
-                  {availableBooks.length > 0 ? (
-                    availableBooks.map(b => (
-                      <button
-                        key={b.book_id}
-                        onClick={() => handleSelectBook(b)}
-                        className={`block w-full text-left px-5 py-4 hover:bg-slate-50 dark:hover:bg-slate-800 border-b border-slate-50 dark:border-slate-800 last:border-b-0 ${
-                          b.book_id === bookId ? 'bg-slate-50 dark:bg-slate-800' : ''
-                        }`}
-                      >
-                        <div className={`font-semibold text-sm ${b.book_id === bookId ? 'text-blue-700 dark:text-blue-400' : 'text-slate-800 dark:text-slate-200'}`}>
-                          {b.title}
-                        </div>
-                        <div className="text-xs text-slate-400 mt-1">{b.department}</div>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-4 py-6 text-slate-500 text-sm text-center flex flex-col items-center gap-2">
-                       <Loader2 className="w-4 h-4 animate-spin"/> Loading library
-                    </div>
-                  )}
-                </div>
-              )}
+  <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-[#252526] border border-slate-200 dark:border-[#333333] rounded-2xl shadow-xl z-50 max-h-80 overflow-y-auto">
+    {availableBooks.length > 0 ? (
+      availableBooks.map(b => {
+        const isCurrent = b.book_id === bookId
+        return (
+          <button
+            key={b.book_id}
+            onClick={() => handleSelectBook(b)}
+            className={`block w-full text-left px-5 py-3.5 transition-colors border-b border-slate-100 dark:border-[#333333] last:border-b-0 ${
+              isCurrent 
+                ? 'bg-blue-50/80 dark:bg-[#007acc]/20 hover:bg-blue-100/70 dark:hover:bg-[#007acc]/30' 
+                : 'hover:bg-slate-50 dark:hover:bg-[#2a2d2e]'
+            }`}
+          >
+            <div className={`font-semibold text-sm ${
+              isCurrent ? 'text-blue-600 dark:text-[#4daafc]' : 'text-slate-800 dark:text-[#cccccc]'
+            }`}>
+              {b.title}
+            </div>
+            <div className="text-xs text-slate-400 dark:text-[#888888] mt-0.5">
+              {b.department}
+            </div>
+          </button>
+        )
+      })
+    ) : (
+      <div className="px-4 py-6 text-slate-400 text-sm text-center flex flex-col items-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin"/> Loading library
+      </div>
+    )}
+  </div>
+)}
             </div>
           </div>
         </div>
 
-        <div className='flex-1 overflow-y-auto p-4 md:p-6'>
+        {/* Message Stream */}
+        <div className='flex-1 overflow-y-auto p-4 md:p-6 bg-white'>
           {history.length === 0 && !response ? (
             <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto">
-              <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-3xl text-blue-600 dark:text-blue-400 mb-6">
+              <div className="bg-blue-50 p-4 rounded-3xl text-blue-600 mb-6 border border-blue-100">
                  <MessageSquare className="w-8 h-8" />
               </div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">How can I help?</h2>
-              <p className="text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                Ask a question about <span className="text-slate-800 dark:text-slate-200 font-bold">{book.title}</span>. I'll provide an answer grounded purely in the textbook's content.
+              <h2 className="text-2xl font-bold text-slate-900 mb-2">How can I help?</h2>
+              <p className="text-slate-500 font-medium leading-relaxed">
+                Ask a question about <span className="text-slate-900 font-bold">{book.title}</span>. I will provide answers grounded directly in the textbook.
               </p>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-8 pb-8">
               {history.map((msg, i) => (
-                <div key={i} className="space-y-8">
+                <div key={i} className="space-y-6">
+                  {/* User Question */}
                   {msg.query && (
                     <div className="flex justify-end">
-                      <div className="max-w-[85%] sm:max-w-[75%] bg-blue-600 dark:bg-blue-600 text-white rounded-3xl rounded-tr-sm px-6 py-4 shadow-sm">
-                        <p className="text-[15px] leading-relaxed break-words">{msg.query}</p>
+                      <div className="max-w-[85%] sm:max-w-[75%] bg-blue-600 text-white rounded-3xl rounded-tr-sm px-6 py-3.5 shadow-sm">
+                        <p className="text-[15px] leading-relaxed break-words font-medium">{msg.query}</p>
                       </div>
                     </div>
                   )}
 
+                  {/* Assistant Answer */}
                   {msg.response && (
-                    <div className="flex justify-start gap-4">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-1 border border-blue-200 dark:border-blue-800 shadow-sm">
+                    <div className="flex justify-start items-start gap-4">
+                      <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
                         <BookOpen className="w-4 h-4" />
                       </div>
-                      <div className="max-w-[90%] sm:max-w-[85%] bg-white dark:bg-transparent rounded-2xl p-2 text-slate-800 dark:text-slate-300 w-full overflow-hidden">
-                        {/* Markdown Renderer with remarkGfm for Tables */}
-                        <div className="text-[15px] leading-relaxed break-words markdown-body">
-                          <ReactMarkdown 
-                            remarkPlugins={[remarkMath, remarkGfm]} 
-                            rehypePlugins={[rehypeKatex]}
-                            components={MarkdownComponents}
-                          >
-                            {msg.response}
-                          </ReactMarkdown>
-                        </div>
+                      <div className="max-w-[90%] sm:max-w-[85%] text-slate-800 text-[15px] leading-relaxed break-words">
+                        <ReactMarkdown 
+                          remarkPlugins={[remarkMath, remarkGfm]} 
+                          rehypePlugins={[rehypeKatex]}
+                          components={MarkdownComponents}
+                        >
+                          {msg.response}
+                        </ReactMarkdown>
                       </div>
                     </div>
                   )}
@@ -378,11 +412,11 @@ export default function ChatSession() {
               ))}
               
               {loading && (
-                <div className='flex justify-start gap-4'>
-                  <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center shrink-0 mt-1 border border-slate-200 dark:border-slate-700">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                <div className='flex justify-start items-center gap-4'>
+                  <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0 border border-slate-200">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
                   </div>
-                  <div className='text-[15px] text-slate-400 font-medium py-1.5'>
+                  <div className='text-[14px] text-slate-500 font-medium'>
                     Analyzing textbook...
                   </div>
                 </div>
@@ -392,20 +426,21 @@ export default function ChatSession() {
           )}
         </div>
 
-        <div className="bg-white dark:bg-transparent pb-6 pt-2 px-4 flex-shrink-0">
+        {/* Bottom Input Area */}
+        <div className="bg-white pb-6 pt-3 px-4 flex-shrink-0 border-t border-slate-200">
           <div className="max-w-3xl mx-auto">
             {error && (
-              <div className='mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-100 dark:border-red-800 text-red-700 dark:text-red-400 rounded-2xl text-sm font-medium'>
+              <div className='mb-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-sm font-medium'>
                 {error}
               </div>
             )}
-            <div className="bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-2 flex flex-col sm:flex-row gap-2 transition-all focus-within:bg-white dark:focus-within:bg-slate-900 focus-within:shadow-md focus-within:border-slate-300 dark:focus-within:border-slate-600">
+            <div className="bg-slate-50 rounded-3xl border border-slate-200 p-2 flex flex-col sm:flex-row gap-2 transition-all shadow-sm focus-within:bg-white focus-within:border-blue-500">
               <textarea
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyPress}
                 placeholder="Ask about this book..."
-                className="flex-1 p-4 bg-transparent focus:outline-none resize-none text-slate-800 dark:text-slate-100 placeholder-slate-400 text-[15px]"
+                className="flex-1 p-3 bg-transparent focus:outline-none resize-none text-slate-900 placeholder-slate-400 text-[15px]"
                 rows={1}
                 disabled={loading}
               />
@@ -413,16 +448,16 @@ export default function ChatSession() {
                 <Button 
                   onClick={sendQuery} 
                   disabled={loading || !query.trim()}
-                  className={`rounded-full w-12 h-12 p-0 flex items-center justify-center transition-all ${
-                    query.trim() && !loading ? 'bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 text-white shadow-sm' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'
+                  className={`rounded-full w-11 h-11 p-0 flex items-center justify-center transition-all ${
+                    query.trim() && !loading ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : 'bg-slate-200 text-slate-400'
                   }`}
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5 ml-0.5" />}
                 </Button>
               </div>
             </div>
-            <div className="text-center mt-3">
-               <span className="text-[11px] font-medium text-slate-400">AI responses are generated directly from indexed textbook materials.</span>
+            <div className="text-center mt-2.5">
+               <span className="text-xs font-medium text-slate-400">AI responses are generated directly from indexed textbook materials.</span>
             </div>
           </div>
         </div>

@@ -439,3 +439,78 @@ def create_error_response(detail: str, code: str = None) -> ErrorResponse:
         error_code=code,
         timestamp=datetime.utcnow()
     )
+
+# ============================================
+# Assessment & Analytics Models
+# ============================================
+
+class QuizQuestion(BaseModel):
+    id: str
+    question: str
+    options: List[str]
+    correct_option_index: int
+    explanation: str
+    topic: str
+    difficulty: str = "medium"  # easy, medium, hard
+
+class AssessmentGenerateRequest(BaseModel):
+    book_id: str
+    topic: Optional[str] = None
+    num_questions: int = Field(default=5, ge=1, le=15)
+    difficulty: str = Field(default="medium")
+
+class AssessmentQuestionClient(BaseModel):
+    id: str
+    question: str
+    options: List[str]
+
+class AssessmentResponse(BaseModel):
+    assessment_id: str
+    book_id: str
+    topic: str
+    questions: List[AssessmentQuestionClient]
+    created_at: datetime
+
+class QuestionSubmission(BaseModel):
+    question_id: str
+    selected_option_index: int
+
+class AssessmentSubmitRequest(BaseModel):
+    assessment_id: str
+    book_id: str
+    answers: List[QuestionSubmission]
+
+class QuestionResult(BaseModel):
+    question_id: str
+    question: str
+    options: List[str]
+    user_answer: int
+    correct_answer: int
+    is_correct: bool
+    explanation: str
+
+class AssessmentResultResponse(BaseModel):
+    assessment_id: str
+    book_id: str
+    score: int
+    total_questions: int
+    percentage: float
+    feedback: str
+    results: List[QuestionResult]
+    submitted_at: datetime
+
+class TopicMastery(BaseModel):
+    topic: str
+    accuracy_percentage: float
+    total_attempts: int
+
+class StudentAnalyticsResponse(BaseModel):
+    user_id: str
+    total_tests_taken: int
+    average_score_percentage: float
+    total_questions_attempted: int
+    total_questions_correct: int
+    recent_assessments: List[Dict[str, Any]]
+    topic_breakdown: List[TopicMastery]
+    learning_streak_days: int
+    last_active: Optional[datetime] = None

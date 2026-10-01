@@ -9,7 +9,7 @@
 	--muted: #4b5563; 
 	--accent: #2563eb; 
 	--accent-light: #3b82f6; 
-	--border: #d0d7de; /* Updated to GitHub's light border color */
+	--border: #d0d7de; 
 	--radius: 12px;
 }
 
@@ -42,8 +42,59 @@ body {
 }
 
 /* ======================================================== */
-/* LIGHT MODE BORDER OVERRIDES (GitHub Style)               */
+/* LIGHT MODE EXPLICIT CHAT & BORDER FIXES                  */
 /* ======================================================== */
+
+html:not(.dark) {
+    color-scheme: light;
+}
+
+html:not(.dark) body {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+
+html:not(.dark) .chat-container,
+html:not(.dark) .chat-main,
+html:not(.dark) .chat-header,
+html:not(.dark) .chat-footer {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+
+html:not(.dark) .chat-input-wrapper {
+    background-color: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) .chat-input-wrapper:focus-within {
+    background-color: #ffffff !important;
+    border-color: #3b82f6 !important;
+}
+
+/* Force High Contrast for Markdown Output in Light Mode */
+html:not(.dark) .markdown-content,
+html:not(.dark) .markdown-content p,
+html:not(.dark) .markdown-content li,
+html:not(.dark) .markdown-content span,
+html:not(.dark) .markdown-content td {
+    color: #1e293b !important; /* High-contrast Slate-800 */
+}
+
+html:not(.dark) .markdown-content strong {
+    color: #0f172a !important; /* Pure Slate-900 Bold */
+}
+
+html:not(.dark) .markdown-content em {
+    color: #334155 !important;
+}
+
+html:not(.dark) .markdown-content h1,
+html:not(.dark) .markdown-content h2,
+html:not(.dark) .markdown-content h3,
+html:not(.dark) .markdown-content h4 {
+    color: #0f172a !important;
+}
 
 html:not(.dark) .border-slate-100, 
 html:not(.dark) .border-slate-200,
@@ -54,7 +105,6 @@ html:not(.dark) .border-gray-200 {
 
 /* ======================================================== */
 /* VS CODE DARK THEME GLOBAL OVERRIDES                      */
-/* Maps existing tailwind light classes to dark palette     */
 /* ======================================================== */
 
 html.dark {
@@ -68,17 +118,26 @@ html.dark body {
 
 /* Backgrounds */
 html.dark .bg-white, 
-html.dark .bg-card { background-color: #252526 !important; }
+html.dark .bg-card,
+html.dark .chat-container,
+html.dark .chat-main,
+html.dark .chat-header,
+html.dark .chat-footer { background-color: #1e1e1e !important; }
 
 html.dark .bg-slate-50, html.dark .bg-gray-50,
-html.dark .bg-slate-100, html.dark .bg-gray-100 { background-color: #1e1e1e !important; }
+html.dark .bg-slate-100, html.dark .bg-gray-100 { background-color: #252526 !important; }
+
+html.dark .chat-input-wrapper {
+    background-color: #252526 !important;
+    border-color: #333333 !important;
+}
+
+html.dark .chat-input-wrapper:focus-within {
+    background-color: #1e1e1e !important;
+    border-color: #007acc !important;
+}
 
 html.dark .bg-slate-200 { background-color: #333333 !important; }
-
-/* Handle Tailwind Background Opacities Safely */
-html.dark .bg-white\/80 { background-color: rgba(37, 37, 38, 0.8) !important; }
-html.dark .bg-slate-50\/50, html.dark .bg-slate-50\/30 { background-color: rgba(30, 30, 30, 0.5) !important; }
-html.dark .bg-slate-900\/20 { background-color: rgba(0, 0, 0, 0.5) !important; }
 
 /* Text Colors */
 html.dark .text-slate-900, html.dark .text-gray-900 { color: #d4d4d4 !important; }
@@ -88,6 +147,20 @@ html.dark .text-slate-600, html.dark .text-gray-600,
 html.dark .text-slate-500, html.dark .text-gray-500,
 html.dark .text-slate-400, html.dark .text-gray-400 { color: #858585 !important; }
 html.dark .text-slate-300 { color: #555555 !important; }
+
+html.dark .markdown-content,
+html.dark .markdown-content p,
+html.dark .markdown-content li,
+html.dark .markdown-content td {
+    color: #cccccc !important;
+}
+
+html.dark .markdown-content strong,
+html.dark .markdown-content h1,
+html.dark .markdown-content h2,
+html.dark .markdown-content h3 {
+    color: #ffffff !important;
+}
 
 /* Borders */
 html.dark .border-slate-100, html.dark .border-gray-100,
@@ -102,66 +175,10 @@ html.dark .hover\:bg-white:hover { background-color: #2a2d2e !important; }
 html.dark .hover\:border-blue-300:hover, html.dark .hover\:border-blue-400:hover,
 html.dark .hover\:border-blue-500:hover { border-color: #007acc !important; }
 
-html.dark .hover\:bg-slate-200:hover { background-color: #3c3c3c !important; }
-
-/* Primary VS Code Blue Accent (Buttons/Links) */
+/* Primary VS Code Blue Accent */
 html.dark .bg-blue-600 { background-color: #007acc !important; }
 html.dark .hover\:bg-blue-700:hover { background-color: #0062a3 !important; }
 html.dark .text-blue-600, html.dark .text-blue-700 { color: #4daafc !important; }
-
-/* Chat Send Button Overrides */
-html.dark .bg-slate-900 { background-color: #007acc !important; color: #ffffff !important; }
-html.dark .hover\:bg-slate-800:hover { background-color: #0062a3 !important; }
-
-/* Soft Backgrounds (Alerts, Highlights) */
-html.dark .bg-blue-50, html.dark .bg-blue-100 { background-color: rgba(0, 122, 204, 0.15) !important; }
-html.dark .bg-indigo-50, html.dark .bg-indigo-100 { background-color: rgba(78, 120, 204, 0.15) !important; }
-html.dark .bg-emerald-50, html.dark .bg-green-50, html.dark .bg-green-100 { background-color: rgba(35, 209, 139, 0.15) !important; }
-html.dark .bg-yellow-50, html.dark .bg-yellow-100 { background-color: rgba(204, 167, 0, 0.15) !important; }
-html.dark .bg-red-50, html.dark .bg-red-100 { background-color: rgba(241, 76, 76, 0.15) !important; }
-
-html.dark .border-blue-100, html.dark .border-blue-200 { border-color: rgba(0, 122, 204, 0.3) !important; }
-html.dark .border-green-100, html.dark .border-green-200 { border-color: rgba(35, 209, 139, 0.3) !important; }
-html.dark .border-yellow-100, html.dark .border-yellow-200 { border-color: rgba(204, 167, 0, 0.3) !important; }
-html.dark .border-red-100, html.dark .border-red-200 { border-color: rgba(241, 76, 76, 0.3) !important; }
-
-html.dark .text-green-600, html.dark .text-green-500, html.dark .text-green-700, html.dark .text-green-800 { color: #23d18b !important; }
-html.dark .text-yellow-600, html.dark .text-yellow-500, html.dark .text-yellow-700, html.dark .text-yellow-800 { color: #cca700 !important; }
-html.dark .text-red-600, html.dark .text-red-500, html.dark .text-red-700, html.dark .text-red-800 { color: #f14c4c !important; }
-
-/* Input, Textareas, and Dropdowns */
-html.dark input, 
-html.dark textarea, 
-html.dark select {
-    background-color: #3c3c3c !important;
-    border-color: #3c3c3c !important;
-    color: #cccccc !important;
-}
-
-html.dark input.bg-transparent, 
-html.dark textarea.bg-transparent {
-    background-color: transparent !important;
-    border-color: transparent !important;
-}
-
-html.dark input:focus, 
-html.dark textarea:focus, 
-html.dark select:focus {
-    border-color: #007acc !important;
-    box-shadow: 0 0 0 1px #007acc !important;
-    outline: none !important;
-}
-
-html.dark input::placeholder, 
-html.dark textarea::placeholder {
-    color: #858585 !important;
-}
-
-/* Target and remove specific gradients on Homepage to prevent light banding */
-html.dark .from-blue-50 {
-    background-image: none !important;
-    background-color: #1e1e1e !important;
-}
 
 /* VS Code native Dark mode scrollbars */
 html.dark ::-webkit-scrollbar-track { background: #1e1e1e; }

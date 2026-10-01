@@ -833,7 +833,124 @@ class RAGConfigModel:
         config["_id"] = result.inserted_id
         return config
 
+class AssessmentModel:
+    """Model for AI-generated assessments and student submissions."""
+    collection_assessments = "assessments"
+    collection_submissions = "assessment_submissions"
 
+    @staticmethod
+    def create_assessment(assessment_id: str, user_id: str, book_id: str, topic: str, questions: list):
+        db = get_db()
+        doc = {
+            "assessment_id": assessment_id,
+            "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+            "book_id": book_id,
+            "topic": topic,
+            "questions": questions,
+            "created_at": datetime.utcnow()
+        }
+        db[AssessmentModel.collection_assessments].insert_one(doc)
+        return doc
+
+    @staticmethod
+    def get_assessment(assessment_id: str):
+        db = get_db()
+        return db[AssessmentModel.collection_assessments].find_one({"assessment_id": assessment_id})
+
+    @staticmethod
+    def record_submission(assessment_id: str, user_id: str, book_id: str, topic: str, score: int, total_questions: int, results: list, feedback: str):
+        db = get_db()
+        submission = {
+            "assessment_id": assessment_id,
+            "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+            "book_id": book_id,
+            "topic": topic,
+            "score": score,
+            "total_questions": total_questions,
+            "percentage": round((score / total_questions) * 100, 2) if total_questions > 0 else 0.0,
+            "results": results,
+            "feedback": feedback,
+            "submitted_at": datetime.utcnow()
+        }
+        db[AssessmentModel.collection_submissions].insert_one(submission)
+        return submission
+
+    @staticmethod
+    def list_student_submissions(user_id: str, limit: int = 20):
+        db = get_db()
+        uid = ObjectId(user_id) if isinstance(user_id, str) else user_id
+        return list(db[AssessmentModel.collection_submissions].find({"user_id": uid}).sort("submitted_at", -1).limit(limit))
+
+
+class StudentAnalyticsModel:
+    """Aggregates analytics and learning trends."""
+
+    @staticmethod
+    def get_student_metrics(user_id: str):
+        db = get_db()
+        uid = ObjectId(user_id) if isinstance(user_id, str) else user_id
+        submissions = list(db[AssessmentModel.collection_submissions].find({"user_id": uid}))
+
+        if not submissions:
+            return {
+                "user_id": str(user_id),
+                "total_tests_taken": 0,
+                "average_score_percentage": 0.0,
+                "total_questions_attempted": 0,
+                "total_questions_correct": 0,
+                "recent_assessments": [],
+                "topic_breakdown": [],
+                "learning_streak_days": 0,
+                "last_active": None
+            }
+
+        total_tests = len(submissions)
+        total_questions = sum(s.get("total_questions", 0) for s in submissions)
+        total_correct = sum(s.get("score", 0) for s in submissions)
+        avg_score = round((total_correct / total_questions * 100), 2) if total_questions > 0 else 0.0
+
+        topic_stats = {}
+        for s in submissions:
+            for item in s.get("results", []):
+                t = item.get("topic") or s.get("topic") or "General"
+                if t not in topic_stats:
+                    topic_stats[t] = {"correct": 0, "total": 0}
+                topic_stats[t]["total"] += 1
+                if item.get("is_correct"):
+                    topic_stats[t]["correct"] += 1
+
+        topic_breakdown = [
+            {
+                "topic": t,
+                "accuracy_percentage": round((data["correct"] / data["total"]) * 100, 2) if data["total"] > 0 else 0.0,
+                "total_attempts": data["total"]
+            }
+            for t, data in topic_stats.items()
+        ]
+
+        recent = []
+        for s in submissions[:10]:
+            recent.append({
+                "assessment_id": s.get("assessment_id"),
+                "book_id": s.get("book_id"),
+                "topic": s.get("topic", "Topic Quiz"),
+                "score": s.get("score"),
+                "total_questions": s.get("total_questions"),
+                "percentage": s.get("percentage"),
+                "submitted_at": s.get("submitted_at")
+            })
+
+        return {
+            "user_id": str(user_id),
+            "total_tests_taken": total_tests,
+            "average_score_percentage": avg_score,
+            "total_questions_attempted": total_questions,
+            "total_questions_correct": total_correct,
+            "recent_assessments": recent,
+            "topic_breakdown": topic_breakdown,
+            "learning_streak_days": min(total_tests, 7),
+            "last_active": submissions[0].get("submitted_at")
+        }
 # ============================================
 # Context Manager for Database Operations
 # ============================================

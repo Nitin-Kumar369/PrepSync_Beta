@@ -545,7 +545,7 @@ async def list_sessions(
     offset: int = 0,
     current_user: dict = Depends(get_current_user_dep)
 ):
-    """List sessions for current user."""
+    """List sessions for current user"""
     try:
         logger.info(f"📋 Listing sessions for user")
         

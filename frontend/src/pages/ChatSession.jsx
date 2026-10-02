@@ -2,10 +2,14 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import API from '../store/authStore'
 import ChatSidebar from '../components/ChatSidebar'
+import AssessmentCard from '../components/AssessmentCard'
 import Button from '../components/UI/Button'
+import Modal from '../components/UI/Modal'
 import { useChatStore } from '../store/chatStore'
-import { Menu, ChevronDown, Send, Loader2, BookOpen, MessageSquare } from 'lucide-react'
-
+import { 
+  Menu, ChevronDown, Send, Loader2, BookOpen, MessageSquare, 
+  Award, Sparkles, SlidersHorizontal 
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -16,7 +20,6 @@ export default function ChatSession() {
   const { bookId } = useParams()
   const [searchParams] = useSearchParams()
   const querySessionId = searchParams.get('session_id')
-  
   const navigate = useNavigate()
   const location = useLocation()
   const bookFromState = location.state?.book
@@ -33,18 +36,27 @@ export default function ChatSession() {
   const [showBookSelector, setShowBookSelector] = useState(false)
   const [availableBooks, setAvailableBooks] = useState([])
   const [refreshSidebar, setRefreshSidebar] = useState(0)
-  
   const { currentSessionId, setCurrentSessionId, startNewSession, fetchSessions } = useChatStore()
-  
+
+  // Assessment Engine States
+  const [activeQuiz, setActiveQuiz] = useState(null)
+  const [quizLoading, setQuizLoading] = useState(false)
+  const [showConfigModal, setShowConfigModal] = useState(false)
+  const [configParams, setConfigParams] = useState({
+    num_questions: 5,
+    difficulty: 'intermediate',
+    question_type: 'single_choice'
+  })
+
   const messagesEndRef = useRef(null)
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   useEffect(() => {
     scrollToBottom()
-  }, [history, loading])
+  }, [history, loading, activeQuiz])
 
   useEffect(() => {
     if (!book && bookId) {
@@ -65,7 +77,7 @@ export default function ChatSession() {
     try {
       const res = await API.get(`/chat/${bookId}/sessions/${sid}`)
       const backendMessages = res.data.messages || []
-      
+
       const formattedHistory = []
       for (let i = 0; i < backendMessages.length; i++) {
         const msg = backendMessages[i]
@@ -75,10 +87,10 @@ export default function ChatSession() {
             response: backendMessages[i + 1].content,
             timestamp: msg.timestamp
           })
-          i++ 
+          i++
         }
       }
-      
+
       setHistory(formattedHistory)
       setCurrentSessionId(sid)
     } catch (e) {
@@ -94,6 +106,7 @@ export default function ChatSession() {
       setResponse(null)
       setQuery('')
       setCurrentSessionId(null)
+      setActiveQuiz(null)
     }
   }, [currentChatId, bookId, querySessionId, setCurrentSessionId])
 
@@ -102,7 +115,7 @@ export default function ChatSession() {
     try {
       const res = await API.get(`/chat/${bookId}/chats/${currentChatId}`)
       const backendMessages = res.data.messages || []
-      
+
       const formattedHistory = []
       for (let i = 0; i < backendMessages.length; i++) {
         const msg = backendMessages[i]
@@ -112,10 +125,10 @@ export default function ChatSession() {
             response: backendMessages[i + 1].content,
             timestamp: msg.timestamp
           })
-          i++ 
+          i++
         }
       }
-      
+
       setHistory(formattedHistory)
       setError(null)
     } catch (e) {
@@ -128,7 +141,7 @@ export default function ChatSession() {
       const res = await API.get('/books/all')
       setAvailableBooks(res.data.books || [])
     } catch (e) {
-      console.error('Failed to fetch books:', e)
+      console.error(e)
     }
   }
 
@@ -147,8 +160,36 @@ export default function ChatSession() {
     }
   }
 
-  const sendQuery = async () => {
-    if (!query.trim() || !book) return
+  // --- Scoped Assessment Generation ---
+  const launchQuiz = async (options = {}) => {
+    setQuizLoading(true)
+    setActiveQuiz(null)
+    setError(null)
+    try {
+      const payload = {
+        book_id: bookId,
+        chat_id: currentChatId,
+        session_id: currentSessionId,
+        mode: options.mode || 'topic',
+        topic: options.topic || book?.subject || 'Core Concepts',
+        context_text: options.contextText || null,
+        num_questions: options.num_questions !== undefined ? options.num_questions : configParams.num_questions,
+        difficulty: options.difficulty || configParams.difficulty,
+        question_type: options.question_type || configParams.question_type
+      }
+      const res = await API.post('/assessment/generate', payload)
+      setActiveQuiz(res.data)
+      setShowConfigModal(false)
+    } catch (e) {
+      setError('Failed to generate in-chat quiz.')
+    } finally {
+      setQuizLoading(false)
+    }
+  }
+
+  const sendQuery = async (customQuery = null) => {
+    const textToSend = customQuery || query
+    if (!textToSend.trim() || !book) return
 
     setLoading(true)
     try {
@@ -157,15 +198,12 @@ export default function ChatSession() {
         sessionId = await startNewSession(bookId)
         fetchSessions(bookId)
       }
-
       const payload = {
-        query: query.trim(),
-        book_id: bookId
+        query: textToSend.trim(),
+        book_id: bookId,
+        session_id: sessionId
       }
-      if (sessionId) {
-        payload.session_id = sessionId
-      }
-      
+
       try {
         const recent = []
         history.slice(-3).forEach(h => {
@@ -186,21 +224,20 @@ export default function ChatSession() {
         setCurrentChatId(res.data.chat_id)
         isNewChat = true
       }
-      
+
       if (isNewChat) {
         setRefreshSidebar(prev => prev + 1)
       }
 
       const newMessage = {
-        query: query,
+        query: textToSend,
         response: res.data.response,
         book_id: bookId,
         timestamp: new Date().toISOString()
       }
 
-      setHistory([...history, newMessage])
-      addMessage(query, res.data.response)
-
+      setHistory(prev => [...prev, newMessage])
+      addMessage(textToSend, res.data.response)
       setResponse(res.data)
       setQuery('')
       setError(null)
@@ -231,28 +268,25 @@ export default function ChatSession() {
     em: ({node, ...props}) => <em className="italic" {...props} />,
     hr: ({node, ...props}) => <hr className="my-4 border-slate-200" {...props} />,
     code: ({ node, className, children, ...props }) => {
-  // A code element is inline if it is directly inside an inline element, or does not contain newlines
-  const isInline = !String(children).includes('\n') && !className?.includes('language-');
-
-  if (isInline) {
-    return (
-      <code 
-        className="px-1.5 py-0.5 mx-0.5 rounded-md font-mono text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200"
-        {...props}
-      >
-        {children}
-      </code>
-    );
-  }
-
-  return (
-    <div className="my-3 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 shadow-sm">
-      <pre className="p-3.5 overflow-x-auto text-xs font-mono text-slate-800 leading-relaxed">
-        <code {...props}>{children}</code>
-      </pre>
-    </div>
-  );
-},
+      const isInline = !String(children).includes('\n') && !className?.includes('language-')
+      if (isInline) {
+        return (
+          <code 
+            className="px-1.5 py-0.5 mx-0.5 rounded-md font-mono text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200"
+            {...props}
+          >
+            {children}
+          </code>
+        )
+      }
+      return (
+        <div className="my-3 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 shadow-sm">
+          <pre className="p-3.5 overflow-x-auto text-xs font-mono text-slate-800 leading-relaxed">
+            <code {...props}>{children}</code>
+          </pre>
+        </div>
+      )
+    },
     table: ({node, ...props}) => (
       <div className="overflow-x-auto my-5 rounded-2xl border border-slate-200 shadow-sm">
         <table className="min-w-full divide-y divide-slate-200 text-sm" {...props} />
@@ -319,69 +353,97 @@ export default function ChatSession() {
                 </p>
               </div>
             </div>
-            <div className="relative">
+
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Live Chapter Quiz Trigger (Uses current configParams) */}
               <button
-                onClick={() => {
-                  setShowBookSelector(!showBookSelector)
-                  if (!availableBooks.length) fetchBooks()
-                }}
-                className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-full text-sm font-semibold transition flex items-center gap-2 border border-slate-200 shadow-sm"
+                onClick={() => launchQuiz({ 
+                  mode: 'topic',
+                  num_questions: configParams.num_questions,
+                  difficulty: configParams.difficulty,
+                  question_type: configParams.question_type
+                })}
+                disabled={quizLoading}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-full text-xs transition border border-blue-200 shadow-sm"
               >
-                Change Book <ChevronDown className="w-4 h-4 text-slate-400"/>
+                <Award className="w-4 h-4 text-blue-600" />
+                <span>{quizLoading ? 'Preparing...' : 'Chapter Quiz'}</span>
               </button>
-              {showBookSelector && (
-  <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-[#252526] border border-slate-200 dark:border-[#333333] rounded-2xl shadow-xl z-50 max-h-80 overflow-y-auto">
-    {availableBooks.length > 0 ? (
-      availableBooks.map(b => {
-        const isCurrent = b.book_id === bookId
-        return (
-          <button
-            key={b.book_id}
-            onClick={() => handleSelectBook(b)}
-            className={`block w-full text-left px-5 py-3.5 transition-colors border-b border-slate-100 dark:border-[#333333] last:border-b-0 ${
-              isCurrent 
-                ? 'bg-blue-50/80 dark:bg-[#007acc]/20 hover:bg-blue-100/70 dark:hover:bg-[#007acc]/30' 
-                : 'hover:bg-slate-50 dark:hover:bg-[#2a2d2e]'
-            }`}
-          >
-            <div className={`font-semibold text-sm ${
-              isCurrent ? 'text-blue-600 dark:text-[#4daafc]' : 'text-slate-800 dark:text-[#cccccc]'
-            }`}>
-              {b.title}
-            </div>
-            <div className="text-xs text-slate-400 dark:text-[#888888] mt-0.5">
-              {b.department}
-            </div>
-          </button>
-        )
-      })
-    ) : (
-      <div className="px-4 py-6 text-slate-400 text-sm text-center flex flex-col items-center gap-2">
-        <Loader2 className="w-4 h-4 animate-spin"/> Loading library
-      </div>
-    )}
-  </div>
-)}
+
+              {/* Custom Exam Configurator */}
+              <button
+                onClick={() => setShowConfigModal(true)}
+                className="p-2 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-full shadow-sm transition-colors"
+                title="Configure custom exam"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+              </button>
+
+              {/* Book Switcher */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowBookSelector(!showBookSelector)
+                    if (!availableBooks.length) fetchBooks()
+                  }}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-full text-sm font-semibold transition flex items-center gap-2 border border-slate-200 shadow-sm"
+                >
+                  Change Book <ChevronDown className="w-4 h-4 text-slate-400"/>
+                </button>
+                {showBookSelector && (
+                  <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-[#252526] border border-slate-200 dark:border-[#333333] rounded-2xl shadow-xl z-50 max-h-80 overflow-y-auto">
+                    {availableBooks.length > 0 ? (
+                      availableBooks.map(b => {
+                        const isCurrent = b.book_id === bookId
+                        return (
+                          <button
+                            key={b.book_id}
+                            onClick={() => handleSelectBook(b)}
+                            className={`block w-full text-left px-5 py-3.5 transition-colors border-b border-slate-100 dark:border-[#333333] last:border-b-0 ${
+                              isCurrent 
+                                ? 'bg-blue-50/80 dark:bg-[#007acc]/20 hover:bg-blue-100/70 dark:hover:bg-[#007acc]/30' 
+                                : 'hover:bg-slate-50 dark:hover:bg-[#2a2d2e]'
+                            }`}
+                          >
+                            <div className={`font-semibold text-sm ${
+                              isCurrent ? 'text-blue-600 dark:text-[#4daafc]' : 'text-slate-800 dark:text-[#cccccc]'
+                            }`}>
+                              {b.title}
+                            </div>
+                            <div className="text-xs text-slate-400 dark:text-[#888888] mt-0.5">
+                              {b.department}
+                            </div>
+                          </button>
+                        )
+                      })
+                    ) : (
+                      <div className="px-4 py-6 text-slate-400 text-sm text-center flex flex-col items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin"/> Loading library
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Message Stream */}
-        <div className='flex-1 overflow-y-auto p-4 md:p-6 bg-white'>
-          {history.length === 0 && !response ? (
+        <div className='flex-1 overflow-y-auto p-4 md:p-6 bg-white space-y-6'>
+          {history.length === 0 && !response && !activeQuiz ? (
             <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto">
               <div className="bg-blue-50 p-4 rounded-3xl text-blue-600 mb-6 border border-blue-100">
-                 <MessageSquare className="w-8 h-8" />
+                <MessageSquare className="w-8 h-8" />
               </div>
               <h2 className="text-2xl font-bold text-slate-900 mb-2">How can I help?</h2>
               <p className="text-slate-500 font-medium leading-relaxed">
-                Ask a question about <span className="text-slate-900 font-bold">{book.title}</span>. I will provide answers grounded directly in the textbook.
+                Ask a question about <span className="text-slate-900 font-bold">{book.title}</span>. When ready, click <span className="font-semibold text-blue-600">Quiz me on this response</span> to verify your retention.
               </p>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-8 pb-8">
+            <div className="max-w-3xl mx-auto space-y-6 pb-8">
               {history.map((msg, i) => (
-                <div key={i} className="space-y-6">
+                <div key={i} className="space-y-4">
                   {/* User Question */}
                   {msg.query && (
                     <div className="flex justify-end">
@@ -391,26 +453,66 @@ export default function ChatSession() {
                     </div>
                   )}
 
-                  {/* Assistant Answer */}
+                  {/* Assistant Answer with Configured "Quiz me on this response" Chip */}
                   {msg.response && (
-                    <div className="flex justify-start items-start gap-4">
-                      <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-                        <BookOpen className="w-4 h-4" />
+                    <div className="space-y-2">
+                      <div className="flex justify-start items-start gap-4">
+                        <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                          <BookOpen className="w-4 h-4" />
+                        </div>
+                        <div className="max-w-[90%] sm:max-w-[85%] text-slate-800 text-[15px] leading-relaxed break-words">
+                          <ReactMarkdown 
+                            remarkPlugins={[remarkMath, remarkGfm]} 
+                            rehypePlugins={[rehypeKatex]}
+                            components={MarkdownComponents}
+                          >
+                            {msg.response}
+                          </ReactMarkdown>
+                        </div>
                       </div>
-                      <div className="max-w-[90%] sm:max-w-[85%] text-slate-800 text-[15px] leading-relaxed break-words">
-                        <ReactMarkdown 
-                          remarkPlugins={[remarkMath, remarkGfm]} 
-                          rehypePlugins={[rehypeKatex]}
-                          components={MarkdownComponents}
+
+                      {/* Post-Response Inline Trigger - Respects configParams */}
+                      <div className="flex justify-start pl-13">
+                        <button
+                          onClick={() => launchQuiz({
+                            mode: 'post_response',
+                            contextText: msg.response,
+                            num_questions: configParams.num_questions,
+                            difficulty: configParams.difficulty,
+                            question_type: configParams.question_type
+                          })}
+                          disabled={quizLoading}
+                          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50/80 hover:bg-blue-100 border border-blue-200 text-blue-700 font-semibold rounded-full text-xs transition shadow-sm"
                         >
-                          {msg.response}
-                        </ReactMarkdown>
+                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Quiz me on this response</span>
+                        </button>
                       </div>
                     </div>
                   )}
                 </div>
               ))}
-              
+
+              {/* In-Chat Interactive Assessment Runner Card */}
+              {activeQuiz && (
+                <AssessmentCard
+                  quiz={activeQuiz}
+                  bookId={bookId}
+                  onClose={() => setActiveQuiz(null)}
+                  onAskFollowup={(remediationPrompt) => {
+                    setActiveQuiz(null)
+                    sendQuery(remediationPrompt)
+                  }}
+                  onRetest={() => launchQuiz({ 
+                    mode: activeQuiz.mode, 
+                    topic: activeQuiz.topic,
+                    num_questions: configParams.num_questions,
+                    difficulty: configParams.difficulty,
+                    question_type: configParams.question_type
+                  })}
+                />
+              )}
+
               {loading && (
                 <div className='flex justify-start items-center gap-4'>
                   <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0 border border-slate-200">
@@ -446,7 +548,7 @@ export default function ChatSession() {
               />
               <div className="flex items-end justify-end p-1">
                 <Button 
-                  onClick={sendQuery} 
+                  onClick={() => sendQuery()} 
                   disabled={loading || !query.trim()}
                   className={`rounded-full w-11 h-11 p-0 flex items-center justify-center transition-all ${
                     query.trim() && !loading ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : 'bg-slate-200 text-slate-400'
@@ -457,11 +559,80 @@ export default function ChatSession() {
               </div>
             </div>
             <div className="text-center mt-2.5">
-               <span className="text-xs font-medium text-slate-400">AI responses are generated directly from indexed textbook materials.</span>
+              <span className="text-xs font-medium text-slate-400">AI responses are generated directly from indexed textbook materials.</span>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Custom Exam Configurator Modal */}
+      <Modal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        title="Custom Exam Configurator"
+        size="md"
+      >
+        <div className="space-y-5 text-sm">
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1.5 text-xs uppercase tracking-wider">Number of Questions</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[3, 5, 10].map(count => (
+                <button
+                  key={count}
+                  onClick={() => setConfigParams(p => ({ ...p, num_questions: count }))}
+                  className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                    configParams.num_questions === count 
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {count} Questions
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1.5 text-xs uppercase tracking-wider">Difficulty Tier</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'foundational', label: 'Foundational' },
+                { id: 'intermediate', label: 'Intermediate' },
+                { id: 'exam_level', label: 'Exam / GATE' }
+              ].map(tier => (
+                <button
+                  key={tier.id}
+                  onClick={() => setConfigParams(p => ({ ...p, difficulty: tier.id }))}
+                  className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                    configParams.difficulty === tier.id 
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {tier.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4 border-t flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowConfigModal(false)} className="rounded-full text-xs px-5">
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => launchQuiz({ 
+                mode: 'custom',
+                num_questions: configParams.num_questions,
+                difficulty: configParams.difficulty,
+                question_type: configParams.question_type
+              })} 
+              className="rounded-full text-xs px-6 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Launch Test
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

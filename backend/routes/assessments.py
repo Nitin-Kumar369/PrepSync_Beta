@@ -1,9 +1,10 @@
 """
-Routes for Assessment Generation, Grading, and Real-time Student Analytics.
+Routes for Assessment Generation, Secure Zero-Leak Grading, and Analytics.
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends, status
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, Depends
 from auth import get_current_user
 from models import (
     AssessmentGenerateRequest, AssessmentResponse,
@@ -15,21 +16,26 @@ from rag.assessment_engine import get_assessment_engine
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/assessment", tags=["Assessment & Analytics"])
+router = APIRouter(prefix="/assessment", tags=["Assessment & Analytics"])
 
 @router.post("/generate", response_model=AssessmentResponse)
 async def generate_assessment(req: AssessmentGenerateRequest, user: dict = Depends(get_current_user)):
-    """Generate a live, contextual assessment for the current book/topic."""
+    """Generates a test scoped strictly to active chat conversation and selected mode."""
     try:
         engine = get_assessment_engine()
         quiz_data = engine.generate_quiz(
             book_id=req.book_id,
+            user_id=user["user_id"],
+            chat_id=req.chat_id,
+            mode=req.mode,
             topic=req.topic or "",
+            context_text=req.context_text,
             num_questions=req.num_questions,
-            difficulty=req.difficulty
+            difficulty=req.difficulty,
+            question_type=req.question_type
         )
 
-        # Store complete quiz with answer key in DB
+        # Store complete quiz with hidden keys in MongoDB
         AssessmentModel.create_assessment(
             assessment_id=quiz_data["assessment_id"],
             user_id=user["user_id"],
@@ -38,18 +44,28 @@ async def generate_assessment(req: AssessmentGenerateRequest, user: dict = Depen
             questions=quiz_data["questions"]
         )
 
-        # Sanitize answers before returning to client
+        # Sanitize answer keys for client payload (Zero-leak validation)
         client_questions = [
-            {"id": q["id"], "question": q["question"], "options": q["options"]}
+            {
+                "id": q["id"],
+                "question": q["question"],
+                "options": q["options"],
+                "question_type": q.get("question_type", "single_choice"),
+                "topic": q.get("topic", "General"),
+                "difficulty": q.get("difficulty", req.difficulty)
+            }
             for q in quiz_data["questions"]
         ]
 
         return {
             "assessment_id": quiz_data["assessment_id"],
             "book_id": req.book_id,
+            "chat_id": req.chat_id,
             "topic": quiz_data["topic"],
+            "mode": quiz_data.get("mode", req.mode),
+            "difficulty": quiz_data.get("difficulty", req.difficulty),
             "questions": client_questions,
-            "created_at": __import__("datetime").datetime.utcnow()
+            "created_at": datetime.utcnow()
         }
     except Exception as e:
         logger.error(f"Failed to generate assessment: {str(e)}")
@@ -57,18 +73,19 @@ async def generate_assessment(req: AssessmentGenerateRequest, user: dict = Depen
 
 @router.post("/submit", response_model=AssessmentResultResponse)
 async def submit_assessment(req: AssessmentSubmitRequest, user: dict = Depends(get_current_user)):
-    """Grade submission and record analytics."""
+    """Grades test server-side, validates hidden answer keys, and persists scorecard."""
     assessment = AssessmentModel.get_assessment(req.assessment_id)
     if not assessment:
-        raise HTTPException(status_code=404, detail="Assessment session not found.")
+        raise HTTPException(status_code=404, detail="Assessment session expired or not found.")
 
     engine = get_assessment_engine()
     eval_result = engine.evaluate_submission(
         stored_questions=assessment["questions"],
-        student_answers=[ans.dict() for ans in req.answers]
+        student_answers=[ans.dict() for ans in req.answers],
+        time_taken_seconds=req.time_taken_seconds or 0
     )
 
-    # Persist student test score and analytics
+    # Persist score and individual question metrics for student's Knowledge Matrix
     AssessmentModel.record_submission(
         assessment_id=req.assessment_id,
         user_id=user["user_id"],
@@ -86,14 +103,16 @@ async def submit_assessment(req: AssessmentSubmitRequest, user: dict = Depends(g
         "score": eval_result["score"],
         "total_questions": eval_result["total_questions"],
         "percentage": eval_result["percentage"],
+        "time_taken_seconds": eval_result["time_taken_seconds"],
+        "badge": eval_result["badge"],
         "feedback": eval_result["feedback"],
         "results": eval_result["results"],
-        "submitted_at": __import__("datetime").datetime.utcnow()
+        "submitted_at": datetime.utcnow()
     }
 
 @router.get("/analytics/student", response_model=StudentAnalyticsResponse)
 async def get_student_analytics(user: dict = Depends(get_current_user)):
-    """Fetch real-time analytics, accuracy trends, and topic mastery breakdown."""
+    """Retrieves real-time analytics for the student account dashboard."""
     try:
         metrics = StudentAnalyticsModel.get_student_metrics(user["user_id"])
         return metrics

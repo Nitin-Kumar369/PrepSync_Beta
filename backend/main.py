@@ -172,6 +172,7 @@ app.include_router(admin_extensions.router, prefix="/api")
 app.include_router(books.router, prefix="/api")
 
 app.include_router(assessments.router)
+app.include_router(assessments.router, prefix="/api")
 # ============================================
 # Error Handlers
 # ============================================

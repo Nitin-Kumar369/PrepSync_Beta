@@ -455,39 +455,54 @@ class QuizQuestion(BaseModel):
 
 class AssessmentGenerateRequest(BaseModel):
     book_id: str
+    chat_id: Optional[str] = None
+    session_id: Optional[str] = None
+    mode: str = Field(default="topic", description="'topic', 'post_response', 'weakness', 'custom'")
     topic: Optional[str] = None
-    num_questions: int = Field(default=5, ge=1, le=15)
-    difficulty: str = Field(default="medium")
+    context_text: Optional[str] = None  # Specific snippet for 'post_response' mode
+    num_questions: int = Field(default=5, ge=1, le=10)
+    difficulty: str = Field(default="intermediate", description="'foundational', 'intermediate', 'exam_level'")
+    question_type: str = Field(default="single_choice", description="'single_choice', 'multi_choice', 'true_false'")
 
 class AssessmentQuestionClient(BaseModel):
     id: str
     question: str
     options: List[str]
+    question_type: str = "single_choice"
+    topic: str
+    difficulty: str
 
 class AssessmentResponse(BaseModel):
     assessment_id: str
     book_id: str
+    chat_id: Optional[str] = None
     topic: str
+    mode: str
+    difficulty: str
     questions: List[AssessmentQuestionClient]
     created_at: datetime
 
 class QuestionSubmission(BaseModel):
     question_id: str
-    selected_option_index: int
+    selected_option_index: Optional[int] = None
+    selected_option_indices: Optional[List[int]] = None
 
 class AssessmentSubmitRequest(BaseModel):
     assessment_id: str
     book_id: str
+    time_taken_seconds: Optional[int] = 0
     answers: List[QuestionSubmission]
 
 class QuestionResult(BaseModel):
     question_id: str
     question: str
     options: List[str]
-    user_answer: int
-    correct_answer: int
+    user_answer: Any
+    correct_answer: Any
     is_correct: bool
     explanation: str
+    topic: str
+    remediation_prompt: str
 
 class AssessmentResultResponse(BaseModel):
     assessment_id: str
@@ -495,6 +510,8 @@ class AssessmentResultResponse(BaseModel):
     score: int
     total_questions: int
     percentage: float
+    time_taken_seconds: int
+    badge: str
     feedback: str
     results: List[QuestionResult]
     submitted_at: datetime
@@ -503,14 +520,26 @@ class TopicMastery(BaseModel):
     topic: str
     accuracy_percentage: float
     total_attempts: int
+    tier: Optional[str] = "Developing"
+    badge: Optional[str] = "Review Needed"
+
+class AdaptiveRecommendation(BaseModel):
+    topic: str
+    status: str
+    message: str
+    suggested_query: str
 
 class StudentAnalyticsResponse(BaseModel):
     user_id: str
     total_tests_taken: int
     average_score_percentage: float
+    pass_rate_percentage: float
     total_questions_attempted: int
     total_questions_correct: int
+    book_coverage_percentage: float
+    learning_streak_days: int
     recent_assessments: List[Dict[str, Any]]
     topic_breakdown: List[TopicMastery]
-    learning_streak_days: int
+    adaptive_recommendations: List[AdaptiveRecommendation]
+    top_explored_tags: List[str]
     last_active: Optional[datetime] = None

@@ -883,32 +883,68 @@ class AssessmentModel:
 
 
 class StudentAnalyticsModel:
-    """Aggregates analytics and learning trends."""
+    """Aggregates comprehensive analytics, knowledge matrix, and adaptive recommendations."""
 
     @staticmethod
     def get_student_metrics(user_id: str):
         db = get_db()
-        uid = ObjectId(user_id) if isinstance(user_id, str) else user_id
-        submissions = list(db[AssessmentModel.collection_submissions].find({"user_id": uid}))
+        # Ensure ObjectId or string matching
+        query = {"$or": [{"user_id": str(user_id)}]}
+        try:
+            query["$or"].append({"user_id": ObjectId(user_id)})
+        except Exception:
+            pass
+
+        submissions = list(db[AssessmentModel.collection_submissions].find(query).sort("submitted_at", -1))
+        user_chats = list(db["chats"].find(query).sort("created_at", -1))
+        total_library_books = db["books"].count_documents({"status": "indexed"}) or 1
+
+        # Track unique books queried in chat
+        queried_book_ids = set()
+        chat_keywords = []
+        for c in user_chats:
+            if c.get("book_id"):
+                queried_book_ids.add(c.get("book_id"))
+            for m in c.get("messages", []):
+                if m.get("role") == "user":
+                    words = [w.strip("?,.!") for w in m.get("content", "").split() if len(w) > 4]
+                    chat_keywords.extend(words[:3])
+
+        # Coverage metric
+        book_coverage_pct = round((len(queried_book_ids) / total_library_books) * 100, 1)
 
         if not submissions:
             return {
                 "user_id": str(user_id),
                 "total_tests_taken": 0,
                 "average_score_percentage": 0.0,
+                "pass_rate_percentage": 0.0,
                 "total_questions_attempted": 0,
                 "total_questions_correct": 0,
+                "book_coverage_percentage": book_coverage_pct,
+                "learning_streak_days": 1 if user_chats else 0,
                 "recent_assessments": [],
                 "topic_breakdown": [],
-                "learning_streak_days": 0,
-                "last_active": None
+                "adaptive_recommendations": [
+                    {
+                        "topic": "Getting Started",
+                        "status": "initial",
+                        "message": "Take your first live assessment from any textbook chat to unlock your personalized diagnostics matrix.",
+                        "suggested_query": "Explain the fundamental principles of this textbook."
+                    }
+                ],
+                "top_explored_tags": list(set(chat_keywords[:8])),
+                "last_active": user_chats[0].get("created_at") if user_chats else None
             }
 
         total_tests = len(submissions)
         total_questions = sum(s.get("total_questions", 0) for s in submissions)
         total_correct = sum(s.get("score", 0) for s in submissions)
-        avg_score = round((total_correct / total_questions * 100), 2) if total_questions > 0 else 0.0
+        avg_score = round((total_correct / total_questions * 100), 1) if total_questions > 0 else 0.0
+        passed_tests = sum(1 for s in submissions if s.get("percentage", 0) >= 70.0)
+        pass_rate = round((passed_tests / total_tests * 100), 1)
 
+        # Topic mastery and diagnostic classification
         topic_stats = {}
         for s in submissions:
             for item in s.get("results", []):
@@ -919,17 +955,55 @@ class StudentAnalyticsModel:
                 if item.get("is_correct"):
                     topic_stats[t]["correct"] += 1
 
-        topic_breakdown = [
-            {
-                "topic": t,
-                "accuracy_percentage": round((data["correct"] / data["total"]) * 100, 2) if data["total"] > 0 else 0.0,
-                "total_attempts": data["total"]
-            }
-            for t, data in topic_stats.items()
-        ]
+        topic_breakdown = []
+        recommendations = []
 
+        for t, data in topic_stats.items():
+            acc = round((data["correct"] / data["total"]) * 100, 1) if data["total"] > 0 else 0.0
+            
+            if acc >= 80.0:
+                tier = "Mastered"
+                badge = "Exam Ready"
+            elif acc >= 50.0:
+                tier = "Developing"
+                badge = "Review Needed"
+                recommendations.append({
+                    "topic": t,
+                    "status": "developing",
+                    "message": f"Solidify your understanding of {t} with conceptual deep-dives.",
+                    "suggested_query": f"Explain key design trade-offs and edge cases in {t}."
+                })
+            else:
+                tier = "Critical Gap"
+                badge = "Urgent Focus"
+                recommendations.append({
+                    "topic": t,
+                    "status": "critical",
+                    "message": f"Accuracy is {acc}%. Re-evaluate fundamentals in {t} before proceeding.",
+                    "suggested_query": f"Give a step-by-step beginner walkthrough of {t}."
+                })
+
+            topic_breakdown.append({
+                "topic": t,
+                "accuracy_percentage": acc,
+                "total_attempts": data["total"],
+                "tier": tier,
+                "badge": badge
+            })
+
+        topic_breakdown.sort(key=lambda x: x["accuracy_percentage"])
+
+        if not recommendations:
+            recommendations.append({
+                "topic": "Comprehensive Revision",
+                "status": "mastered",
+                "message": "All evaluated topics are above 80%! Advance to complex applied architectural scenarios.",
+                "suggested_query": "Test my advanced problem-solving skills on real-world engineering failures."
+            })
+
+        # Recent test items including details for interactive modal review
         recent = []
-        for s in submissions[:10]:
+        for s in submissions[:20]:
             recent.append({
                 "assessment_id": s.get("assessment_id"),
                 "book_id": s.get("book_id"),
@@ -937,6 +1011,8 @@ class StudentAnalyticsModel:
                 "score": s.get("score"),
                 "total_questions": s.get("total_questions"),
                 "percentage": s.get("percentage"),
+                "feedback": s.get("feedback", ""),
+                "results": s.get("results", []),
                 "submitted_at": s.get("submitted_at")
             })
 
@@ -944,11 +1020,15 @@ class StudentAnalyticsModel:
             "user_id": str(user_id),
             "total_tests_taken": total_tests,
             "average_score_percentage": avg_score,
+            "pass_rate_percentage": pass_rate,
             "total_questions_attempted": total_questions,
             "total_questions_correct": total_correct,
+            "book_coverage_percentage": book_coverage_pct,
+            "learning_streak_days": min(total_tests + len(user_chats), 7),
             "recent_assessments": recent,
             "topic_breakdown": topic_breakdown,
-            "learning_streak_days": min(total_tests, 7),
+            "adaptive_recommendations": recommendations[:3],
+            "top_explored_tags": list(set(chat_keywords[:10])),
             "last_active": submissions[0].get("submitted_at")
         }
 # ============================================

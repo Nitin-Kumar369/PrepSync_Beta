@@ -1,25 +1,35 @@
 """
-Simplified chunking pipeline for college-level demo.
-
-Extracts text from a PDF using pypdf and splits into fixed-size chunks.
-This avoids heavy external dependencies and preserves plain-text content.
+Text extraction and recursive chunking pipeline for engineering textbooks.
+Splits text along natural structural boundaries (paragraphs, sentences)
+and sizes chunks to fit the attention context of sentence-transformer models.
 """
-
 import logging
 from typing import List, Dict, Any
 from pathlib import Path
 import pypdf
 
+# LangChain text splitter (from requirements.txt)
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 logger = logging.getLogger(__name__)
 
 
 class SimpleChunkingPipeline:
-    """Simple text extraction and chunking from PDFs."""
+    """Text extraction and structure-aware chunking for PDFs."""
 
-    def __init__(self, chunk_size: int = 6000, chunk_overlap: int = 400):
-        # 6000 chars ≈ 1000 words (averaging 6 chars/word + spaces)
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 180):
+        # 1000 chars (~180-200 tokens) comfortably fits within all-MiniLM-L6-v2's 256 token ceiling
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            separators=["\n\n\n", "\n\n", "\n", ". ", "; ", " ", ""],
+            length_function=len
+        )
 
     def _extract_text(self, pdf_path: str) -> str:
         try:
@@ -32,34 +42,36 @@ class SimpleChunkingPipeline:
                         parts.append(txt)
                 return "\n\n".join(parts)
         except Exception as e:
-            logger.error(f"PDF extraction failed: {e}")
+            logger.error(f"PDF extraction failed for {pdf_path}: {e}")
             return ""
 
-    def _split_text(self, text: str) -> List[str]:
-        if not text:
-            return []
-        chunks = []
-        start = 0
-        length = len(text)
-        while start < length:
-            end = start + self.chunk_size
-            chunk = text[start:end]
-            chunks.append(chunk.strip())
-            start = end - self.chunk_overlap if end < length else end
-        return chunks
-
-    def process_book(self, pdf_path: str, book_id: str, book_name: str = "", department: str = "", year_of_study: str = "", subject: str = "") -> List[Dict[str, Any]]:
-        """Extract text and return list of simple chunk dicts."""
+    def process_book(
+        self,
+        pdf_path: str,
+        book_id: str,
+        book_name: str = "",
+        department: str = "",
+        year_of_study: str = "",
+        subject: str = ""
+    ) -> List[Dict[str, Any]]:
+        """Extract text and produce structured, bounded chunks."""
         text = self._extract_text(pdf_path)
         if not text:
             return []
 
-        raw_chunks = self._split_text(text)
+        # Split respecting paragraphs and sentence breaks
+        split_texts = self.splitter.split_text(text)
+
         chunks = []
-        for i, c in enumerate(raw_chunks):
+        for i, c in enumerate(split_texts):
+            clean_text = c.strip()
+            # Omit boilerplate lines and residual page header remnants
+            if len(clean_text) < 40:
+                continue
+
             chunks.append({
                 "id": f"{book_id}_chunk_{i}",
-                "text": c,
+                "text": clean_text,
                 "metadata": {
                     "book_id": book_id,
                     "book_name": book_name,
@@ -69,7 +81,8 @@ class SimpleChunkingPipeline:
                     "chunk_index": i,
                 }
             })
-        logger.info(f"Split book {book_id} into {len(chunks)} chunks")
+
+        logger.info(f"Split book '{book_id}' into {len(chunks)} structural chunks")
         return chunks
 
 
@@ -90,14 +103,9 @@ def init_chunking_pipeline():
 
 
 if __name__ == "__main__":
-    # Test chunking (requires a sample PDF)
     import logging
-
     logging.basicConfig(level=logging.INFO)
-
     pipeline = get_chunking_pipeline()
-
-    # Example: process a test PDF (if it exists)
     test_pdf = "./test_book.pdf"
     if Path(test_pdf).exists():
         chunks = pipeline.process_book(

@@ -5,6 +5,21 @@ import API from '../store/authStore'
 import { Button, Card, Alert, Skeleton } from '../components/UI'
 import { BookOpen, MessageSquare, Zap, Library, ArrowRight, BookX } from 'lucide-react'
 
+// Helper to generate acronym from name
+const getAbbreviation = (name = '') => {
+  if (!name.trim()) return ''
+  const words = name.trim().split(/[\s_-]+/)
+  if (words.length === 1) return name.toUpperCase()
+  
+  const acronym = words
+    .filter(w => !['and', '&', 'of', 'in', 'to', 'for', 'the'].includes(w.toLowerCase()))
+    .map(w => w[0])
+    .join('')
+    .toUpperCase()
+
+  return acronym || words.map(w => w[0]).join('').toUpperCase()
+}
+
 export default function Home() {
   const { user } = useAuthStore()
   const [departments, setDepartments] = useState([])
@@ -45,7 +60,6 @@ export default function Home() {
             <p className='text-lg md:text-xl text-slate-600 leading-relaxed max-w-lg'>
               Access engineering textbooks and learn faster. Get instant, contextual answers grounded purely in real textbook content.
             </p>
-
             {!user ? (
               <div className='flex flex-col sm:flex-row gap-4 pt-4'>
                 <Link to='/signup'>
@@ -122,7 +136,10 @@ export default function Home() {
                   <div className='flex flex-col h-full'>
                     <div className="flex items-center gap-3 mb-4">
                       <Skeleton className="w-12 h-12 rounded-2xl shrink-0" />
-                      <Skeleton className="h-6 w-32" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-6 w-24" />
+                        <Skeleton className="h-4 w-40" />
+                      </div>
                     </div>
                     <Skeleton className="h-4 w-full mb-2" />
                     <Skeleton className="h-4 w-4/5 mb-6 flex-grow" />
@@ -135,34 +152,49 @@ export default function Home() {
 
           {!loading && departments.length > 0 && (
             <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
-              {departments.map((dept) => (
-                <Link
-                  key={dept}
-                  to={`/department/${encodeURIComponent(dept)}`}
-                >
-                  <Card 
-                    hoverable
-                    className='h-full border border-slate-200 hover:border-blue-300 rounded-3xl p-2 transition-all shadow-sm hover:shadow-md'
+              {departments.map((dept) => {
+                const abbr = getAbbreviation(dept)
+                const isAlreadyAbbr = abbr.toLowerCase() === dept.trim().toLowerCase()
+
+                return (
+                  <Link
+                    key={dept}
+                    to={`/department/${encodeURIComponent(dept)}`}
                   >
-                    <div className='flex flex-col h-full'>
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="bg-slate-100 p-3 rounded-2xl text-slate-700">
-                          <BookOpen className="w-6 h-6" />
+                    <Card 
+                      hoverable
+                      className='h-full border border-slate-200 hover:border-blue-300 rounded-3xl p-2 transition-all shadow-sm hover:shadow-md'
+                    >
+                      <div className='flex flex-col h-full'>
+                        <div className="flex items-start gap-3 mb-4">
+                          <div className="bg-slate-100 p-3 rounded-2xl text-slate-700 shrink-0 mt-0.5">
+                            <BookOpen className="w-6 h-6" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {/* Abbreviation as primary title */}
+                            <h3 className='text-2xl font-bold text-slate-900 tracking-tight leading-tight'>
+                              {abbr}
+                            </h3>
+                            {/* Full department name as subtitle */}
+                            {!isAlreadyAbbr && (
+                              <p className='text-xs font-semibold text-slate-500 mt-0.5 leading-snug'>
+                                {dept}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <h3 className='text-xl font-bold text-slate-900 leading-tight'>
-                          {dept}
-                        </h3>
+
+                        <p className='text-slate-600 text-sm mb-6 flex-grow leading-relaxed px-1'>
+                          Explore textbooks and chat with AI-powered assistance dedicated to {dept}.
+                        </p>
+                        <div className="text-blue-600 font-semibold text-sm flex items-center gap-1 px-1">
+                          Browse Books <ArrowRight className="w-4 h-4" />
+                        </div>
                       </div>
-                      <p className='text-slate-600 text-sm mb-6 flex-grow leading-relaxed px-1'>
-                        Explore textbooks and chat with AI-powered assistance dedicated to {dept}.
-                      </p>
-                      <div className="text-blue-600 font-semibold text-sm flex items-center gap-1 px-1">
-                        Browse Books <ArrowRight className="w-4 h-4" />
-                      </div>
-                    </div>
-                  </Card>
-                </Link>
-              ))}
+                    </Card>
+                  </Link>
+                )
+              })}
             </div>
           )}
 

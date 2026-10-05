@@ -276,52 +276,69 @@ async def test_rag(
     try:
         if not request.query or len(request.query.strip()) < 3:
             raise HTTPException(status_code=400, detail="Query must be at least 3 characters")
-        
+
         start_time = datetime.utcnow()
-        
-        # Get vector store and search
+
+        # Query ChromaDB via the vector store
         vs = get_vector_store()
-        results = vs.search(request.query, top_k=request.top_k, book_id=request.book_id)
-        
+        results = vs.search(
+            query_text=request.query.strip(),
+            top_k=request.top_k,
+            book_id=request.book_id if request.book_id else None
+        )
+
         end_time = datetime.utcnow()
         retrieval_time_ms = (end_time - start_time).total_seconds() * 1000
-        
-        # Format results
+
         formatted_results = []
         for idx, result in enumerate(results, 1):
-            metadata = result.get("metadata", {})
-            text = result.get("text", "")
-            
-            # Create preview (first 300 chars)
+            metadata = result.get("metadata", {}) or {}
+            text = result.get("text", "") or ""
+
+            # Create clean preview text
             preview = text[:300] + ("..." if len(text) > 300 else "")
-            preview = preview.replace("\n", " ")
-            
+            preview = preview.replace("\n", " ").strip()
+
+            # Safely extract optional page numbers
+            page_start = metadata.get("page_start")
+            page_end = metadata.get("page_end")
+            try:
+                page_start = int(page_start) if page_start not in (None, "", "?") else None
+            except (ValueError, TypeError):
+                page_start = None
+
+            try:
+                page_end = int(page_end) if page_end not in (None, "", "?") else None
+            except (ValueError, TypeError):
+                page_end = None
+
+            chapter = str(metadata.get("chapter")) if metadata.get("chapter") not in (None, "") else None
+
             formatted_results.append(RAGTestResultItem(
                 rank=idx,
-                similarity_score=result.get("similarity_score", 0.0),
-                book_name=metadata.get("book_name", "Unknown"),
-                department=metadata.get("department", ""),
-                subject=metadata.get("subject", ""),
-                page_start=metadata.get("page_start"),
-                page_end=metadata.get("page_end"),
-                chapter=metadata.get("chapter"),
+                similarity_score=round(float(result.get("similarity_score", 0.0)), 4),
+                book_name=str(metadata.get("book_name") or "Unknown Book"),
+                department=str(metadata.get("department") or ""),
+                subject=str(metadata.get("subject") or ""),
+                page_start=page_start,
+                page_end=page_end,
+                chapter=chapter,
                 text_preview=preview,
                 full_text=text
             ))
-        
+
         return RAGTestResponse(
             query=request.query,
             book_id=request.book_id,
             total_results=len(formatted_results),
             results=formatted_results,
-            retrieval_time_ms=retrieval_time_ms
+            retrieval_time_ms=round(retrieval_time_ms, 2)
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in RAG test: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to test RAG retrieval")
-
+        logger.error(f"Error in RAG test: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"RAG test failed: {str(e)}")
 
 # ============================================
 # VECTOR MANAGEMENT ENDPOINTS

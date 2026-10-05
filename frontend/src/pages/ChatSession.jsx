@@ -18,28 +18,32 @@ import 'katex/dist/katex.min.css'
 
 export default function ChatSession() {
   const { bookId } = useParams()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const queryChatId = searchParams.get('chat_id')
   const querySessionId = searchParams.get('session_id')
+
   const navigate = useNavigate()
   const location = useLocation()
   const bookFromState = location.state?.book
+  const prefilledQuery = location.state?.prefilledQuery
 
   const [book, setBook] = useState(bookFromState || null)
   const { setCurrentBook, addMessage } = useChatStore()
-  const [query, setQuery] = useState('')
-  const [response, setResponse] = useState(null)
+  
+  const [query, setQuery] = useState(prefilledQuery || '')
   const [loading, setLoading] = useState(false)
-  const [history, setHistory] = useState([])
+  const [messages, setMessages] = useState([])
   const [error, setError] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [currentChatId, setCurrentChatId] = useState(null)
+  
+  const [currentChatId, setCurrentChatId] = useState(queryChatId || null)
   const [showBookSelector, setShowBookSelector] = useState(false)
   const [availableBooks, setAvailableBooks] = useState([])
   const [refreshSidebar, setRefreshSidebar] = useState(0)
+
   const { currentSessionId, setCurrentSessionId, startNewSession, fetchSessions } = useChatStore()
 
   // Assessment Engine States
-  const [activeQuiz, setActiveQuiz] = useState(null)
   const [quizLoading, setQuizLoading] = useState(false)
   const [showConfigModal, setShowConfigModal] = useState(false)
   const [configParams, setConfigParams] = useState({
@@ -56,7 +60,15 @@ export default function ChatSession() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [history, loading, activeQuiz])
+  }, [messages, loading])
+
+  // Sync state if URL search parameters update
+  useEffect(() => {
+    const urlCid = searchParams.get('chat_id')
+    if (urlCid !== currentChatId) {
+      setCurrentChatId(urlCid || null)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     if (!book && bookId) {
@@ -67,72 +79,68 @@ export default function ChatSession() {
     }
   }, [bookId, book, setCurrentBook])
 
-  useEffect(() => {
-    if (querySessionId && bookId && !currentChatId) {
-      fetchSessionHistory(querySessionId)
-    }
-  }, [querySessionId, bookId, currentChatId])
-
-  const fetchSessionHistory = async (sid) => {
+  const fetchBookDetails = async () => {
     try {
-      const res = await API.get(`/chat/${bookId}/sessions/${sid}`)
-      const backendMessages = res.data.messages || []
-
-      const formattedHistory = []
-      for (let i = 0; i < backendMessages.length; i++) {
-        const msg = backendMessages[i]
-        if (msg.role === 'user' && i + 1 < backendMessages.length && backendMessages[i + 1].role === 'assistant') {
-          formattedHistory.push({
-            query: msg.content,
-            response: backendMessages[i + 1].content,
-            timestamp: msg.timestamp
-          })
-          i++
-        }
-      }
-
-      setHistory(formattedHistory)
-      setCurrentSessionId(sid)
+      const res = await API.get(`/books/${bookId}`)
+      setBook(res.data)
     } catch (e) {
-      console.error('Failed to load session from URL:', e)
+      setError('Failed to fetch book details')
     }
   }
 
+  // Load chat items when chat_id or session_id changes
   useEffect(() => {
     if (currentChatId && bookId) {
-      fetchChatHistory()
+      fetchChatHistory(currentChatId)
+    } else if (querySessionId && bookId && !currentChatId) {
+      fetchSessionHistory(querySessionId)
     } else if (!currentChatId && !querySessionId) {
-      setHistory([])
-      setResponse(null)
-      setQuery('')
+      setMessages([])
       setCurrentSessionId(null)
-      setActiveQuiz(null)
     }
-  }, [currentChatId, bookId, querySessionId, setCurrentSessionId])
+  }, [currentChatId, querySessionId, bookId])
 
-  const fetchChatHistory = async () => {
-    if (!currentChatId || !bookId) return
+  const fetchChatHistory = async (cid) => {
+    if (!cid || !bookId) return
+    setLoading(true)
+    setError(null)
     try {
-      const res = await API.get(`/chat/${bookId}/chats/${currentChatId}`)
-      const backendMessages = res.data.messages || []
-
-      const formattedHistory = []
-      for (let i = 0; i < backendMessages.length; i++) {
-        const msg = backendMessages[i]
-        if (msg.role === 'user' && i + 1 < backendMessages.length && backendMessages[i + 1].role === 'assistant') {
-          formattedHistory.push({
-            query: msg.content,
-            response: backendMessages[i + 1].content,
-            timestamp: msg.timestamp
-          })
-          i++
+      const res = await API.get(`/chat/${bookId}/chats/${cid}`)
+      const rawMessages = res.data.messages || []
+      // Historic assessments collapsed by default
+      const processed = rawMessages.map(m => {
+        if (m.role === 'assessment') {
+          return { ...m, isExpanded: false }
         }
-      }
-
-      setHistory(formattedHistory)
-      setError(null)
+        return m
+      })
+      setMessages(processed)
     } catch (e) {
       setError('Failed to load chat: ' + (e.response?.data?.detail || e.message))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchSessionHistory = async (sid) => {
+    if (!sid || !bookId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await API.get(`/chat/${bookId}/sessions/${sid}`)
+      const rawMessages = res.data.messages || []
+      const processed = rawMessages.map(m => {
+        if (m.role === 'assessment') {
+          return { ...m, isExpanded: false }
+        }
+        return m
+      })
+      setMessages(processed)
+      setCurrentSessionId(sid)
+    } catch (e) {
+      console.error('Failed to load session from URL:', e)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -151,35 +159,67 @@ export default function ChatSession() {
     setShowBookSelector(false)
   }
 
-  const fetchBookDetails = async () => {
-    try {
-      const res = await API.get(`/books/${bookId}`)
-      setBook(res.data)
-    } catch (e) {
-      setError('Failed to fetch book details')
+  const handleSelectChat = (chatId) => {
+    setCurrentChatId(chatId)
+    if (chatId) {
+      setSearchParams({ chat_id: chatId })
+    } else {
+      setSearchParams({})
+      setMessages([])
+      setCurrentSessionId(null)
     }
   }
 
-  // --- Scoped Assessment Generation ---
+  // --- Centralized launchQuiz Handler ---
   const launchQuiz = async (options = {}) => {
     setQuizLoading(true)
-    setActiveQuiz(null)
     setError(null)
     try {
+      let activeCid = currentChatId
+      if (!activeCid) {
+        let sid = currentSessionId
+        if (!sid) {
+          sid = await startNewSession(bookId)
+          fetchSessions(bookId)
+        }
+        activeCid = sid
+        setCurrentChatId(activeCid)
+        setSearchParams({ chat_id: activeCid })
+      }
+
+      // Determine robust topic: explicit topic passed > book subject > fallback
+      const chosenTopic = options.topic || book?.subject || 'Core Concepts'
+
       const payload = {
         book_id: bookId,
-        chat_id: currentChatId,
+        chat_id: activeCid,
         session_id: currentSessionId,
         mode: options.mode || 'topic',
-        topic: options.topic || book?.subject || 'Core Concepts',
+        topic: chosenTopic,
         context_text: options.contextText || null,
         num_questions: options.num_questions !== undefined ? options.num_questions : configParams.num_questions,
         difficulty: options.difficulty || configParams.difficulty,
         question_type: options.question_type || configParams.question_type
       }
+
       const res = await API.post('/assessment/generate', payload)
-      setActiveQuiz(res.data)
+      
+      // Append fresh test in expanded state into the chat stream
+      const newAssessmentItem = {
+        role: 'assessment',
+        assessment_id: res.data.assessment_id,
+        topic: res.data.topic || chosenTopic,
+        difficulty: res.data.difficulty,
+        mode: res.data.mode,
+        questions: res.data.questions,
+        completed: false,
+        result: null,
+        isExpanded: true,
+        timestamp: new Date().toISOString()
+      }
+      setMessages(prev => [...prev, newAssessmentItem])
       setShowConfigModal(false)
+      setRefreshSidebar(prev => prev + 1)
     } catch (e) {
       setError('Failed to generate in-chat quiz.')
     } finally {
@@ -190,55 +230,61 @@ export default function ChatSession() {
   const sendQuery = async (customQuery = null) => {
     const textToSend = customQuery || query
     if (!textToSend.trim() || !book) return
-
     setLoading(true)
     try {
       let sessionId = currentSessionId
-      if (!sessionId) {
+      if (!sessionId && !currentChatId) {
         sessionId = await startNewSession(bookId)
         fetchSessions(bookId)
       }
+
       const payload = {
         query: textToSend.trim(),
         book_id: bookId,
-        session_id: sessionId
+        chat_id: currentChatId || undefined,
+        session_id: sessionId || undefined
       }
 
-      try {
-        const recent = []
-        history.slice(-3).forEach(h => {
-          if (h.query) recent.push({ role: 'user', content: h.query })
-          if (h.response) recent.push({ role: 'assistant', content: h.response })
+      // Collect chat history, skipping assessment cards
+      const recent = []
+      messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-6)
+        .forEach(m => {
+          recent.push({ role: m.role, content: m.content })
         })
-        if (recent.length) payload.previous_messages = recent
-      } catch (e) {}
+      if (recent.length) payload.previous_messages = recent
 
       const res = await API.post(`/chat/${bookId}`, payload)
 
-      let isNewChat = false
+      let isNew = false
+      if (res.data.chat_id && res.data.chat_id !== currentChatId) {
+        setCurrentChatId(res.data.chat_id)
+        setSearchParams({ chat_id: res.data.chat_id })
+        isNew = true
+      }
       if (res.data.session_id && !currentSessionId) {
         setCurrentSessionId(res.data.session_id)
-        isNewChat = true
+        isNew = true
       }
-      if (res.data.chat_id && !currentChatId) {
-        setCurrentChatId(res.data.chat_id)
-        isNewChat = true
-      }
-
-      if (isNewChat) {
+      if (isNew) {
         setRefreshSidebar(prev => prev + 1)
       }
 
-      const newMessage = {
-        query: textToSend,
-        response: res.data.response,
-        book_id: bookId,
+      const userMsg = {
+        role: 'user',
+        content: textToSend,
         timestamp: new Date().toISOString()
       }
+      const assistantMsg = {
+        role: 'assistant',
+        content: res.data.response,
+        timestamp: new Date().toISOString(),
+        sources: res.data.sources || []
+      }
 
-      setHistory(prev => [...prev, newMessage])
+      setMessages(prev => [...prev, userMsg, assistantMsg])
       addMessage(textToSend, res.data.response)
-      setResponse(res.data)
       setQuery('')
       setError(null)
     } catch (e) {
@@ -272,7 +318,7 @@ export default function ChatSession() {
       if (isInline) {
         return (
           <code 
-            className="px-1.5 py-0.5 mx-0.5 rounded-md font-mono text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200"
+            className="px-1.5 py-0.5 mx-0.5 rounded-md font-mono text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200" 
             {...props}
           >
             {children}
@@ -324,10 +370,7 @@ export default function ChatSession() {
       <ChatSidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        onSelectChat={(chatId) => {
-          setCurrentChatId(chatId)
-          setSidebarOpen(false)
-        }}
+        onSelectChat={handleSelectChat}
         currentChatId={currentChatId}
         bookId={bookId}
         refreshTrigger={refreshSidebar}
@@ -355,10 +398,11 @@ export default function ChatSession() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Live Chapter Quiz Trigger (Uses current configParams) */}
+              {/* TRIGGER 1: Top Header "Chapter Quiz" */}
               <button
                 onClick={() => launchQuiz({ 
                   mode: 'topic',
+                  topic: book?.subject || 'Core Concepts',
                   num_questions: configParams.num_questions,
                   difficulty: configParams.difficulty,
                   question_type: configParams.question_type
@@ -370,7 +414,6 @@ export default function ChatSession() {
                 <span>{quizLoading ? 'Preparing...' : 'Chapter Quiz'}</span>
               </button>
 
-              {/* Custom Exam Configurator */}
               <button
                 onClick={() => setShowConfigModal(true)}
                 className="p-2 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-full shadow-sm transition-colors"
@@ -379,7 +422,6 @@ export default function ChatSession() {
                 <SlidersHorizontal className="w-4 h-4" />
               </button>
 
-              {/* Book Switcher */}
               <div className="relative">
                 <button
                   onClick={() => {
@@ -390,6 +432,7 @@ export default function ChatSession() {
                 >
                   Change Book <ChevronDown className="w-4 h-4 text-slate-400"/>
                 </button>
+
                 {showBookSelector && (
                   <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-[#252526] border border-slate-200 dark:border-[#333333] rounded-2xl shadow-xl z-50 max-h-80 overflow-y-auto">
                     {availableBooks.length > 0 ? (
@@ -430,88 +473,93 @@ export default function ChatSession() {
 
         {/* Message Stream */}
         <div className='flex-1 overflow-y-auto p-4 md:p-6 bg-white space-y-6'>
-          {history.length === 0 && !response && !activeQuiz ? (
+          {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto">
               <div className="bg-blue-50 p-4 rounded-3xl text-blue-600 mb-6 border border-blue-100">
                 <MessageSquare className="w-8 h-8" />
               </div>
               <h2 className="text-2xl font-bold text-slate-900 mb-2">How can I help?</h2>
               <p className="text-slate-500 font-medium leading-relaxed">
-                Ask a question about <span className="text-slate-900 font-bold">{book.title}</span>. When ready, click <span className="font-semibold text-blue-600">Quiz me on this response</span> to verify your retention.
+                Ask a question about <span className="text-slate-900 font-bold">{book.title}</span>. When ready, click <span className="font-semibold text-blue-600">Quiz me on this response</span> to test your understanding.
               </p>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-6 pb-8">
-              {history.map((msg, i) => (
-                <div key={i} className="space-y-4">
-                  {/* User Question */}
-                  {msg.query && (
-                    <div className="flex justify-end">
-                      <div className="max-w-[85%] sm:max-w-[75%] bg-blue-600 text-white rounded-3xl rounded-tr-sm px-6 py-3.5 shadow-sm">
-                        <p className="text-[15px] leading-relaxed break-words font-medium">{msg.query}</p>
-                      </div>
-                    </div>
-                  )}
+              {messages.map((item, i) => {
+                // Assessment Card within chat
+                if (item.role === 'assessment') {
+                  return (
+                    <AssessmentCard
+                      key={item.assessment_id || i}
+                      quiz={item}
+                      bookId={bookId}
+                      initialExpanded={item.isExpanded ?? false}
+                      onAskFollowup={(remediationPrompt) => {
+                        sendQuery(remediationPrompt)
+                      }}
+                      /* TRIGGER 2: Retake Test on an existing assessment card */
+                      onRetest={() => launchQuiz({ 
+                        mode: item.mode || 'topic', 
+                        topic: item.topic || book?.subject || 'Core Concepts',
+                        num_questions: configParams.num_questions,
+                        difficulty: configParams.difficulty,
+                        question_type: configParams.question_type
+                      })}
+                    />
+                  )
+                }
 
-                  {/* Assistant Answer with Configured "Quiz me on this response" Chip */}
-                  {msg.response && (
-                    <div className="space-y-2">
-                      <div className="flex justify-start items-start gap-4">
-                        <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-                          <BookOpen className="w-4 h-4" />
+                // Regular User / Assistant Messages
+                return (
+                  <div key={i} className="space-y-4">
+                    {item.role === 'user' && (
+                      <div className="flex justify-end">
+                        <div className="max-w-[85%] sm:max-w-[75%] bg-blue-600 text-white rounded-3xl rounded-tr-sm px-6 py-3.5 shadow-sm">
+                          <p className="text-[15px] leading-relaxed break-words font-medium">{item.content}</p>
                         </div>
-                        <div className="max-w-[90%] sm:max-w-[85%] text-slate-800 text-[15px] leading-relaxed break-words">
-                          <ReactMarkdown 
-                            remarkPlugins={[remarkMath, remarkGfm]} 
-                            rehypePlugins={[rehypeKatex]}
-                            components={MarkdownComponents}
+                      </div>
+                    )}
+
+                    {item.role === 'assistant' && (
+                      <div className="space-y-2">
+                        <div className="flex justify-start items-start gap-4">
+                          <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                            <BookOpen className="w-4 h-4" />
+                          </div>
+                          <div className="max-w-[90%] sm:max-w-[85%] text-slate-800 text-[15px] leading-relaxed break-words">
+                            <ReactMarkdown 
+                              remarkPlugins={[remarkMath, remarkGfm]} 
+                              rehypePlugins={[rehypeKatex]}
+                              components={MarkdownComponents}
+                            >
+                              {item.content}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+
+                        {/* TRIGGER 3: Inline "Quiz me on this response" Chip */}
+                        <div className="flex justify-start pl-13">
+                          <button
+                            onClick={() => launchQuiz({
+                              mode: 'post_response',
+                              topic: book?.subject || '',
+                              contextText: item.content,
+                              num_questions: configParams.num_questions,
+                              difficulty: configParams.difficulty,
+                              question_type: configParams.question_type
+                            })}
+                            disabled={quizLoading}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50/80 hover:bg-blue-100 border border-blue-200 text-blue-700 font-semibold rounded-full text-xs transition shadow-sm"
                           >
-                            {msg.response}
-                          </ReactMarkdown>
+                            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Quiz me on this response</span>
+                          </button>
                         </div>
                       </div>
-
-                      {/* Post-Response Inline Trigger - Respects configParams */}
-                      <div className="flex justify-start pl-13">
-                        <button
-                          onClick={() => launchQuiz({
-                            mode: 'post_response',
-                            contextText: msg.response,
-                            num_questions: configParams.num_questions,
-                            difficulty: configParams.difficulty,
-                            question_type: configParams.question_type
-                          })}
-                          disabled={quizLoading}
-                          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50/80 hover:bg-blue-100 border border-blue-200 text-blue-700 font-semibold rounded-full text-xs transition shadow-sm"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                          <span>Quiz me on this response</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* In-Chat Interactive Assessment Runner Card */}
-              {activeQuiz && (
-                <AssessmentCard
-                  quiz={activeQuiz}
-                  bookId={bookId}
-                  onClose={() => setActiveQuiz(null)}
-                  onAskFollowup={(remediationPrompt) => {
-                    setActiveQuiz(null)
-                    sendQuery(remediationPrompt)
-                  }}
-                  onRetest={() => launchQuiz({ 
-                    mode: activeQuiz.mode, 
-                    topic: activeQuiz.topic,
-                    num_questions: configParams.num_questions,
-                    difficulty: configParams.difficulty,
-                    question_type: configParams.question_type
-                  })}
-                />
-              )}
+                    )}
+                  </div>
+                )
+              })}
 
               {loading && (
                 <div className='flex justify-start items-center gap-4'>
@@ -565,7 +613,7 @@ export default function ChatSession() {
         </div>
       </div>
 
-      {/* Custom Exam Configurator Modal */}
+      {/* Modal for Custom Exam Configurator */}
       <Modal
         isOpen={showConfigModal}
         onClose={() => setShowConfigModal(false)}
@@ -620,8 +668,9 @@ export default function ChatSession() {
               Cancel
             </Button>
             <Button 
-              onClick={() => launchQuiz({ 
+              onClick={() => launchQuiz({
                 mode: 'custom',
+                topic: book?.subject || 'Custom Exam',
                 num_questions: configParams.num_questions,
                 difficulty: configParams.difficulty,
                 question_type: configParams.question_type

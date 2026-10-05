@@ -1,198 +1,198 @@
 """
-Simplified 'vector store' using MongoDB with support for both naive and semantic search.
-
-This stores chunks in the `chunks` collection and performs retrieval using either:
-1. Naive token-overlap scoring (default, simpler for college projects)
-2. Semantic similarity using embeddings (via sentence-transformers)
+ChromaDB vector store implementation.
+Persists chunks, embeddings, and metadata directly in ChromaDB.
 """
-
+import sys
+import os
 import logging
+
+# Ensure backend root is on sys.path for internal imports like 'config'
+_BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
+# SQLite workaround for environments with outdated system sqlite3
+try:
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
+
+import chromadb
+from chromadb.config import Settings as ChromaSettings
 from typing import List, Dict, Optional, Tuple
 from config import settings
-from db import get_db
+from rag.embedding_manager import embed_text, embed_texts
 
 logger = logging.getLogger(__name__)
 
 
-class SimpleVectorStore:
-    """Store chunks in MongoDB and retrieve by simple similarity."""
+class ChromaVectorStore:
+    """Store chunks and vector embeddings using persistent ChromaDB."""
 
     def __init__(self):
-        self.db = get_db()
-        self.collection = self.db["chunks"]
+        os.makedirs(settings.chroma_db_path, exist_ok=True)
+        self.client = chromadb.PersistentClient(
+            path=settings.chroma_db_path,
+            settings=ChromaSettings(anonymized_telemetry=False)
+        )
+        self.collection = self.client.get_or_create_collection(
+            name=settings.chroma_collection_name,
+            metadata={"hnsw:space": "cosine"}
+        )
 
     def add_chunks(self, chunks: List[Dict]) -> int:
+        """Embed and upsert chunks with their metadata into ChromaDB."""
         if not chunks:
             return 0
-        docs = []
+
+        ids = [c["id"] for c in chunks]
+        texts = [c["text"] for c in chunks]
+
+        sanitized_metadatas = []
         for c in chunks:
-            doc = {
-                "_id": c.get("id"),
-                "text": c.get("text"),
-                "metadata": c.get("metadata", {})
-            }
-            docs.append(doc)
-        # Upsert each chunk to avoid duplicates
-        for d in docs:
-            self.collection.update_one({"_id": d["_id"]}, {"$set": d}, upsert=True)
-        logger.info(f"Stored {len(docs)} chunks in MongoDB")
-        return len(docs)
+            raw_meta = c.get("metadata", {})
+            clean_meta = {}
+            for k, v in raw_meta.items():
+                if v is None:
+                    clean_meta[k] = ""
+                elif isinstance(v, (str, int, float, bool)):
+                    clean_meta[k] = v
+                else:
+                    clean_meta[k] = str(v)
+            sanitized_metadatas.append(clean_meta)
 
-    def query(self, query_text: str, n_results: int = 5, where_filter: Dict = None, book_id: str = None) -> Tuple[List[str], List[Dict], List[None], List[float]]:
-        """Query using strategy based on config (semantic or naive)."""
-        # Add book_id to filter if provided
+        embeddings = embed_texts(texts, batch_size=32)
+
+        self.collection.upsert(
+            ids=ids,
+            documents=texts,
+            embeddings=embeddings,
+            metadatas=sanitized_metadatas
+        )
+        logger.info(f"Upserted {len(ids)} chunks into ChromaDB collection '{settings.chroma_collection_name}'")
+        return len(ids)
+
+    def query(
+        self,
+        query_text: str,
+        n_results: int = 5,
+        where_filter: Optional[Dict] = None,
+        book_id: Optional[str] = None
+    ) -> Tuple[List[str], List[Dict], List[None], List[float]]:
+        """Query ChromaDB using cosine similarity."""
+        conditions = []
         if book_id:
-            where_filter = where_filter or {}
-            where_filter["metadata.book_id"] = book_id
-        
-        # Use semantic search if configured and embeddings are available
-        if settings.vector_db_type == "semantic":
-            return self._semantic_query(query_text, n_results, where_filter)
+            conditions.append({"book_id": {"$eq": book_id}})
+
+        if where_filter:
+            for k, v in where_filter.items():
+                if v:
+                    field = k.replace("metadata.", "")
+                    conditions.append({field: {"$eq": v}})
+
+        if len(conditions) > 1:
+            query_where = {"$and": conditions}
+        elif len(conditions) == 1:
+            query_where = conditions[0]
         else:
-            return self._naive_query(query_text, n_results, where_filter)
+            query_where = None
 
-    def _naive_query(self, query_text: str, n_results: int = 5, where_filter: Dict = None) -> Tuple[List[str], List[Dict], List[None], List[float]]:
-        # naive token overlap scoring
-        tokens = set([t.lower() for t in query_text.split() if len(t) > 2])
-        cursor = self.collection.find(where_filter or {})
-        scored = []
-        for doc in cursor:
-            text_tokens = set([t.lower() for t in (doc.get("text") or "").split() if len(t) > 2])
-            if not text_tokens:
-                score = 0.0
-            else:
-                inter = tokens.intersection(text_tokens)
-                score = len(inter) / max(1, len(tokens))
-            scored.append((score, doc))
+        query_embedding = embed_text(query_text)
 
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top = scored[:n_results]
-        documents = [d[1]["text"] for d in top]
-        metadatas = [d[1].get("metadata", {}) for d in top]
-        embeddings = [None for _ in top]
-        similarity_scores = [float(d[0]) for d in top]
+        total_available = self.collection.count()
+        if total_available == 0:
+            logger.warning("ChromaDB collection is empty.")
+            return [], [], [], []
+
+        effective_n = min(n_results, total_available)
+
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=effective_n,
+            where=query_where
+        )
+
+        documents = results["documents"][0] if results["documents"] else []
+        metadatas = results["metadatas"][0] if results["metadatas"] else []
+        distances = results["distances"][0] if results.get("distances") and results["distances"] else []
+
+        similarity_scores = [max(0.0, 1.0 - float(d)) for d in distances]
+        embeddings = [None] * len(documents)
+
         return documents, metadatas, embeddings, similarity_scores
 
-    def _semantic_query(self, query_text: str, n_results: int = 5, where_filter: Dict = None) -> Tuple[List[str], List[Dict], List[None], List[float]]:
-        """Semantic search using embeddings."""
-        try:
-            from rag.embedding_manager import get_embedding_manager
-            import numpy as np
-            
-            manager = get_embedding_manager()
-            
-            # Get embedding model and encode query
-            from rag.embedding_manager import embed_text
-            query_embedding = np.array(embed_text(query_text))
-            
-            # Get chunks with embeddings
-            query_filter = {"embedding_vector": {"$exists": True, "$ne": None}}
-            if where_filter:
-                query_filter.update(where_filter)
-            
-            chunks = list(self.collection.find(query_filter))
-            
-            if not chunks:
-                logger.warning(f"No chunks with embeddings found (where_filter={where_filter})")
-                # Fallback to naive search
-                return self._naive_query(query_text, n_results, where_filter)
-            
-            # Calculate similarities
-            scored = []
-            for chunk in chunks:
-                try:
-                    chunk_embedding = np.array(chunk.get("embedding_vector", []))
-                    if len(chunk_embedding) == 0:
-                        continue
-                    
-                    # Cosine similarity
-                    dot_product = np.dot(query_embedding, chunk_embedding)
-                    norm_q = np.linalg.norm(query_embedding)
-                    norm_c = np.linalg.norm(chunk_embedding)
-                    
-                    if norm_q == 0 or norm_c == 0:
-                        score = 0.0
-                    else:
-                        score = float(dot_product / (norm_q * norm_c))
-                    
-                    scored.append((score, chunk))
-                except Exception as e:
-                    logger.warning(f"Error calculating similarity: {str(e)}")
-                    continue
-            
-            scored.sort(key=lambda x: x[0], reverse=True)
-            top = scored[:n_results]
-            documents = [d[1]["text"] for d in top]
-            metadatas = [d[1].get("metadata", {}) for d in top]
-            embeddings = [None for _ in top]
-            similarity_scores = [float(d[0]) for d in top]
-            
-            return documents, metadatas, embeddings, similarity_scores
-        
-        except Exception as e:
-            logger.warning(f"Semantic search failed, falling back to naive: {str(e)}")
-            return self._naive_query(query_text, n_results, where_filter)
-
-    def search(self, query_text: str, top_k: int = 5, book_id: str = None, use_semantic: bool = None) -> List[Dict]:
-        """Search and return chunk dictionaries with similarity scores."""
-        # Determine search strategy
-        semantic = use_semantic if use_semantic is not None else (settings.vector_db_type == "semantic")
-        
-        where_filter = {}
-        if book_id:
-            where_filter["metadata.book_id"] = book_id
-        
-        documents, metadatas, embeddings, scores = self.query(
-            query_text, top_k, where_filter, book_id
+    def search(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        book_id: Optional[str] = None,
+        use_semantic: bool = True
+    ) -> List[Dict]:
+        """Convenience method returning a list of matched chunk dicts."""
+        documents, metadatas, _, scores = self.query(
+            query_text=query_text,
+            n_results=top_k,
+            book_id=book_id
         )
-        
-        result = []
+
+        results = []
         for doc, meta, score in zip(documents, metadatas, scores):
-            result.append({
+            results.append({
                 "text": doc,
                 "metadata": meta,
                 "similarity_score": score
             })
-        
-        return result
+        return results
 
     def delete_by_book_id(self, book_id: str) -> int:
-        res = self.collection.delete_many({"metadata.book_id": book_id})
-        logger.info(f"Deleted {res.deleted_count} chunks for book {book_id}")
-        return res.deleted_count
+        """Delete all chunks tagged with a specific book_id."""
+        try:
+            self.collection.delete(where={"book_id": {"$eq": book_id}})
+            logger.info(f"Deleted chunks for book '{book_id}' from ChromaDB")
+            return 1
+        except Exception as e:
+            logger.error(f"Error deleting chunks for book {book_id}: {e}")
+            return 0
 
     def delete_all(self) -> bool:
-        self.collection.delete_many({})
-        logger.info("Cleared all chunks collection")
-        return True
-
-    def get_collection_stats(self) -> Dict:
-        count = self.collection.count_documents({})
-        return {"total_chunks": count}
-
-    def health_check(self) -> bool:
+        """Clear all vectors from the collection."""
         try:
-            self.db.command("ping")
+            self.client.delete_collection(settings.chroma_collection_name)
+            self.collection = self.client.get_or_create_collection(
+                name=settings.chroma_collection_name,
+                metadata={"hnsw:space": "cosine"}
+            )
+            logger.info("Cleared ChromaDB collection")
             return True
         except Exception as e:
-            logger.error(f"MongoDB health check failed: {e}")
+            logger.error(f"Failed to clear ChromaDB: {e}")
+            return False
+
+    def get_collection_stats(self) -> Dict:
+        """Return collection count."""
+        return {"total_chunks": self.collection.count()}
+
+    def health_check(self) -> bool:
+        """Ping ChromaDB client."""
+        try:
+            self.client.heartbeat()
+            return True
+        except Exception as e:
+            logger.error(f"ChromaDB health check failed: {e}")
             return False
 
 
-_store: Optional[SimpleVectorStore] = None
+_store: Optional[ChromaVectorStore] = None
 
 
-def get_vector_store() -> SimpleVectorStore:
+def get_vector_store() -> ChromaVectorStore:
     global _store
     if _store is None:
-        _store = SimpleVectorStore()
+        _store = ChromaVectorStore()
     return _store
 
 
 def init_vector_store():
-    try:
-        get_vector_store()
-        logger.info("Vector store (MongoDB) initialized")
-    except Exception as e:
-        logger.error(f"Failed to initialize vector store: {e}")
-        raise
+    get_vector_store()
+    logger.info("ChromaDB vector store initialized")

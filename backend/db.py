@@ -3,13 +3,14 @@ MongoDB connection and database utilities.
 """
 
 import logging
+import os
 from typing import Optional
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from contextlib import contextmanager
 from config import settings
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,6 @@ class UserModel:
         """Update user fields. Pass user_id and any fields to update."""
         db = get_db()
         update_fields = {}
-        # Only allow safe fields to be updated
         allowed_fields = ["full_name", "department", "email", "role", "active"]
         for field in allowed_fields:
             if field in kwargs:
@@ -212,13 +212,8 @@ class UserModel:
         db = get_db()
         user_obj_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
         
-        # Delete user's chats
         db["chats"].delete_many({"user_id": user_obj_id})
-        
-        # Delete user's sessions
         db["sessions"].delete_many({"user_id": user_obj_id})
-        
-        # Delete the user
         db[UserModel.collection_name].delete_one({"_id": user_obj_id})
 
     @staticmethod
@@ -311,7 +306,6 @@ class CategoryModel:
     @staticmethod
     def create_department(name: str):
         db = get_db()
-        # if department already exists, return existing document (id included)
         existing = db[CategoryModel.collection_name].find_one({"name": name})
         if existing:
             return existing
@@ -328,23 +322,18 @@ class CategoryModel:
     @staticmethod
     def delete_department(name: str):
         db = get_db()
-        # Cascade-delete all books, chunks, files and vectors under this department
         from rag.vector_store import get_vector_store
-        from datetime import datetime
 
-        # find books under department
         books = list(db["books"].find({"department": name}))
         vs = get_vector_store()
         for b in books:
             book_id = b.get("book_id")
-            # remove file if exists
             try:
                 path = b.get("file_path")
                 if path and os.path.exists(path):
                     os.remove(path)
             except Exception:
                 pass
-            # delete vectors/chunks
             try:
                 vs.delete_by_book_id(book_id)
             except Exception:
@@ -353,13 +342,11 @@ class CategoryModel:
                 db["chunks"].delete_many({"metadata.book_id": book_id})
             except Exception:
                 pass
-            # delete book record
             try:
                 db[BookModel.collection_name].delete_one({"book_id": book_id})
             except Exception:
                 pass
 
-        # finally remove the category document
         db[CategoryModel.collection_name].delete_one({"name": name})
 
     @staticmethod
@@ -379,7 +366,6 @@ class CategoryModel:
     @staticmethod
     def delete_year(dept: str, year: str):
         db = get_db()
-        # Cascade-delete all books under dept/year then remove year entry
         from rag.vector_store import get_vector_store
 
         books = list(db["books"].find({"department": dept, "year_of_study": year}))
@@ -429,7 +415,6 @@ class CategoryModel:
     @staticmethod
     def delete_subject(dept: str, year: str, subject: str):
         db = get_db()
-        # Cascade-delete all books under dept/year/subject then remove subject
         from rag.vector_store import get_vector_store
 
         books = list(db["books"].find({"department": dept, "year_of_study": year, "subject": subject}))
@@ -459,7 +444,6 @@ class CategoryModel:
             {"name": dept, "years.year": year},
             {"$pull": {"years.$.subjects": subject}}
         )
-
 
 
 class BookModel:
@@ -589,15 +573,12 @@ class BookModel:
     def delete_book_complete(book_id: str):
         """Delete a book and cascade delete vectors, chunks, and file."""
         db = get_db()
-        import os
         from rag.vector_store import get_vector_store
         
-        # Get book record
         book = BookModel.find_by_book_id(book_id)
         if not book:
             return False
         
-        # Delete file if it exists
         try:
             file_path = book.get("file_path")
             if file_path and os.path.exists(file_path):
@@ -606,7 +587,6 @@ class BookModel:
         except Exception as e:
             logger.warning(f"Failed to delete file for book {book_id}: {e}")
         
-        # Delete vectors from vector store
         try:
             vs = get_vector_store()
             vs.delete_by_book_id(book_id)
@@ -614,14 +594,12 @@ class BookModel:
         except Exception as e:
             logger.warning(f"Failed to delete vectors for book {book_id}: {e}")
         
-        # Delete chunks from database
         try:
             db["chunks"].delete_many({"metadata.book_id": book_id})
             logger.info(f"Deleted chunks for book {book_id}")
         except Exception as e:
             logger.warning(f"Failed to delete chunks for book {book_id}: {e}")
         
-        # Delete book record
         db[BookModel.collection_name].delete_one({"book_id": book_id})
         logger.info(f"Deleted book record: {book_id}")
         return True
@@ -650,7 +628,6 @@ class BookModel:
     @staticmethod
     def get_storage_size():
         """Get approximate storage size in GB."""
-        import os
         db = get_db()
         books = db[BookModel.collection_name].find({}, {"file_path": 1})
         total_size = 0
@@ -659,9 +636,8 @@ class BookModel:
                 path = book.get("file_path")
                 if path and os.path.exists(path):
                     total_size += os.path.getsize(path)
-            except:
+            except Exception:
                 pass
-        # Convert bytes to GB
         return total_size / (1024 ** 3)
 
 
@@ -789,8 +765,6 @@ class SessionModel:
     @staticmethod
     def count_active_sessions(hours: int = 24):
         """Count sessions with messages in the last N hours."""
-        from datetime import timedelta
-        db = get_db()
         cutoff_time = datetime.utcnow() - timedelta(hours=hours)
         return db[SessionModel.collection_name].count_documents({"last_message_at": {"$gte": cutoff_time}})
 
@@ -813,8 +787,6 @@ class RAGConfigModel:
                updated_by_admin: str):
         """Create a new RAG configuration."""
         db = get_db()
-
-        # Get next version
         last_config = RAGConfigModel.get_current()
         next_version = (last_config["config_version"] + 1) if last_config else 1
 
@@ -832,6 +804,7 @@ class RAGConfigModel:
         result = db[RAGConfigModel.collection_name].insert_one(config)
         config["_id"] = result.inserted_id
         return config
+
 
 class AssessmentModel:
     """Model for AI-generated assessments and student submissions."""
@@ -888,7 +861,6 @@ class StudentAnalyticsModel:
     @staticmethod
     def get_student_metrics(user_id: str):
         db = get_db()
-        # Ensure ObjectId or string matching
         query = {"$or": [{"user_id": str(user_id)}]}
         try:
             query["$or"].append({"user_id": ObjectId(user_id)})
@@ -899,19 +871,52 @@ class StudentAnalyticsModel:
         user_chats = list(db["chats"].find(query).sort("created_at", -1))
         total_library_books = db["books"].count_documents({"status": "indexed"}) or 1
 
-        # Track unique books queried in chat
+        # Track unique books queried in chat & collect activity dates
         queried_book_ids = set()
         chat_keywords = []
+        active_dates = set()
+
         for c in user_chats:
             if c.get("book_id"):
                 queried_book_ids.add(c.get("book_id"))
+            
+            # Record chat timestamps for streak calculation
+            for ts in [c.get("created_at"), c.get("updated_at")]:
+                if isinstance(ts, datetime):
+                    active_dates.add(ts.date())
+
             for m in c.get("messages", []):
                 if m.get("role") == "user":
                     words = [w.strip("?,.!") for w in m.get("content", "").split() if len(w) > 4]
                     chat_keywords.extend(words[:3])
 
-        # Coverage metric
+        # Record assessment timestamps for streak calculation
+        for s in submissions:
+            sub_date = s.get("submitted_at")
+            if isinstance(sub_date, datetime):
+                active_dates.add(sub_date.date())
+
+        # -------------------------------------------------------------
+        # ACCURATE CONSECUTIVE CALENDAR-DAY STREAK CALCULATION (NO 7-DAY CAP)
+        # -------------------------------------------------------------
+        current_streak = 0
+        if active_dates:
+            today = datetime.utcnow().date()
+            yesterday = today - timedelta(days=1)
+            
+            # Start streak check from today if active, else from yesterday
+            cursor_day = today if today in active_dates else (yesterday if yesterday in active_dates else None)
+            
+            if cursor_day:
+                while cursor_day in active_dates:
+                    current_streak += 1
+                    cursor_day -= timedelta(days=1)
+
         book_coverage_pct = round((len(queried_book_ids) / total_library_books) * 100, 1)
+
+        book_cache = {}
+        for b in db["books"].find({}, {"book_id": 1, "subject": 1, "title": 1}):
+            book_cache[b.get("book_id")] = b
 
         if not submissions:
             return {
@@ -922,9 +927,10 @@ class StudentAnalyticsModel:
                 "total_questions_attempted": 0,
                 "total_questions_correct": 0,
                 "book_coverage_percentage": book_coverage_pct,
-                "learning_streak_days": 1 if user_chats else 0,
+                "learning_streak_days": current_streak,
                 "recent_assessments": [],
                 "topic_breakdown": [],
+                "subjects_breakdown": [],
                 "adaptive_recommendations": [
                     {
                         "topic": "Getting Started",
@@ -944,54 +950,113 @@ class StudentAnalyticsModel:
         passed_tests = sum(1 for s in submissions if s.get("percentage", 0) >= 70.0)
         pass_rate = round((passed_tests / total_tests * 100), 1)
 
-        # Topic mastery and diagnostic classification
-        topic_stats = {}
-        for s in submissions:
-            for item in s.get("results", []):
-                t = item.get("topic") or s.get("topic") or "General"
-                if t not in topic_stats:
-                    topic_stats[t] = {"correct": 0, "total": 0}
-                topic_stats[t]["total"] += 1
-                if item.get("is_correct"):
-                    topic_stats[t]["correct"] += 1
+        # -------------------------------------------------------------
+        # HIERARCHICAL SUBJECT & TOPIC AGGREGATION
+        # Group metrics strictly by Subject -> Sub-Topics
+        # -------------------------------------------------------------
+        subjects_data = {}
 
-        topic_breakdown = []
+        for s in submissions:
+            b_info = book_cache.get(s.get("book_id"), {})
+            subject_name = b_info.get("subject") or b_info.get("title") or "General"
+            
+            if subject_name not in subjects_data:
+                subjects_data[subject_name] = {
+                    "total_tests": 0,
+                    "passed_tests": 0,
+                    "total_questions": 0,
+                    "total_correct": 0,
+                    "topics": {}
+                }
+
+            subjects_data[subject_name]["total_tests"] += 1
+            if s.get("percentage", 0) >= 70.0:
+                subjects_data[subject_name]["passed_tests"] += 1
+
+            for item in s.get("results", []):
+                sub_topic = item.get("topic") or s.get("topic") or subject_name
+                if sub_topic.strip().lower() == subject_name.strip().lower():
+                    sub_topic = "Core Fundamentals"
+
+                topic_dict = subjects_data[subject_name]["topics"]
+                if sub_topic not in topic_dict:
+                    topic_dict[sub_topic] = {"correct": 0, "total": 0}
+
+                topic_dict[sub_topic]["total"] += 1
+                subjects_data[subject_name]["total_questions"] += 1
+
+                if item.get("is_correct"):
+                    topic_dict[sub_topic]["correct"] += 1
+                    subjects_data[subject_name]["total_correct"] += 1
+
+        subjects_breakdown = []
+        all_topics_flat = []
         recommendations = []
 
-        for t, data in topic_stats.items():
-            acc = round((data["correct"] / data["total"]) * 100, 1) if data["total"] > 0 else 0.0
-            
-            if acc >= 80.0:
-                tier = "Mastered"
-                badge = "Exam Ready"
-            elif acc >= 50.0:
-                tier = "Developing"
-                badge = "Review Needed"
-                recommendations.append({
-                    "topic": t,
-                    "status": "developing",
-                    "message": f"Solidify your understanding of {t} with conceptual deep-dives.",
-                    "suggested_query": f"Explain key design trade-offs and edge cases in {t}."
-                })
-            else:
-                tier = "Critical Gap"
-                badge = "Urgent Focus"
-                recommendations.append({
-                    "topic": t,
-                    "status": "critical",
-                    "message": f"Accuracy is {acc}%. Re-evaluate fundamentals in {t} before proceeding.",
-                    "suggested_query": f"Give a step-by-step beginner walkthrough of {t}."
-                })
+        for subj_name, data in subjects_data.items():
+            s_acc = round((data["total_correct"] / data["total_questions"] * 100), 1) if data["total_questions"] > 0 else 0.0
+            s_pass_rate = round((data["passed_tests"] / data["total_tests"] * 100), 1) if data["total_tests"] > 0 else 0.0
 
-            topic_breakdown.append({
-                "topic": t,
-                "accuracy_percentage": acc,
-                "total_attempts": data["total"],
-                "tier": tier,
-                "badge": badge
+            if s_acc >= 80.0:
+                s_tier = "Mastered"
+                s_badge = "Exam Ready"
+            elif s_acc >= 50.0:
+                s_tier = "Developing"
+                s_badge = "Review Needed"
+            else:
+                s_tier = "Critical Gap"
+                s_badge = "Urgent Focus"
+
+            topic_list = []
+            for t_name, t_stat in data["topics"].items():
+                t_acc = round((t_stat["correct"] / t_stat["total"] * 100), 1) if t_stat["total"] > 0 else 0.0
+                if t_acc >= 80.0:
+                    t_tier = "Mastered"
+                    t_badge = "Exam Ready"
+                elif t_acc >= 50.0:
+                    t_tier = "Developing"
+                    t_badge = "Review Needed"
+                    recommendations.append({
+                        "topic": f"{subj_name}: {t_name}",
+                        "status": "developing",
+                        "message": f"Solidify your understanding of {t_name} in {subj_name}.",
+                        "suggested_query": f"Explain key design trade-offs and edge cases in {t_name}."
+                    })
+                else:
+                    t_tier = "Critical Gap"
+                    t_badge = "Urgent Focus"
+                    recommendations.append({
+                        "topic": f"{subj_name}: {t_name}",
+                        "status": "critical",
+                        "message": f"Accuracy is {t_acc}% in {t_name}. Re-evaluate fundamentals before proceeding.",
+                        "suggested_query": f"Give a step-by-step beginner walkthrough of {t_name}."
+                    })
+
+                item_obj = {
+                    "topic": t_name,
+                    "accuracy_percentage": t_acc,
+                    "total_attempts": t_stat["total"],
+                    "tier": t_tier,
+                    "badge": t_badge
+                }
+                topic_list.append(item_obj)
+                all_topics_flat.append(item_obj)
+
+            topic_list.sort(key=lambda x: x["accuracy_percentage"])
+
+            subjects_breakdown.append({
+                "subject": subj_name,
+                "total_tests_taken": data["total_tests"],
+                "total_questions": data["total_questions"],
+                "total_correct": data["total_correct"],
+                "accuracy_percentage": s_acc,
+                "pass_rate_percentage": s_pass_rate,
+                "tier": s_tier,
+                "badge": s_badge,
+                "topics": topic_list
             })
 
-        topic_breakdown.sort(key=lambda x: x["accuracy_percentage"])
+        subjects_breakdown.sort(key=lambda x: x["accuracy_percentage"])
 
         if not recommendations:
             recommendations.append({
@@ -1001,12 +1066,14 @@ class StudentAnalyticsModel:
                 "suggested_query": "Test my advanced problem-solving skills on real-world engineering failures."
             })
 
-        # Recent test items including details for interactive modal review
         recent = []
-        for s in submissions[:20]:
+        for s in submissions[:30]:
+            b_info = book_cache.get(s.get("book_id"), {})
+            subject_name = b_info.get("subject") or b_info.get("title") or ""
             recent.append({
                 "assessment_id": s.get("assessment_id"),
                 "book_id": s.get("book_id"),
+                "subject": subject_name,
                 "topic": s.get("topic", "Topic Quiz"),
                 "score": s.get("score"),
                 "total_questions": s.get("total_questions"),
@@ -1024,13 +1091,16 @@ class StudentAnalyticsModel:
             "total_questions_attempted": total_questions,
             "total_questions_correct": total_correct,
             "book_coverage_percentage": book_coverage_pct,
-            "learning_streak_days": min(total_tests + len(user_chats), 7),
+            "learning_streak_days": current_streak,
             "recent_assessments": recent,
-            "topic_breakdown": topic_breakdown,
+            "topic_breakdown": all_topics_flat,
+            "subjects_breakdown": subjects_breakdown,
             "adaptive_recommendations": recommendations[:3],
             "top_explored_tags": list(set(chat_keywords[:10])),
             "last_active": submissions[0].get("submitted_at")
         }
+
+
 # ============================================
 # Context Manager for Database Operations
 # ============================================
@@ -1063,7 +1133,6 @@ def init_db():
 
 
 if __name__ == "__main__":
-    # Test database connection
     import logging
 
     logging.basicConfig(level=logging.INFO)

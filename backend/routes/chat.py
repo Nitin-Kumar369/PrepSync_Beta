@@ -30,7 +30,7 @@ from bson import ObjectId
 
 from models import (
     ChatQueryRequest, ChatQueryResponse, ChatHistoryResponse,
-    ChatHistoryItem, FullChatResponse, MessageSource, BookFilter
+    ChatHistoryItem, FullChatResponse, MessageSource, BookFilter, ChatMessage
 )
 from db import ChatModel, UserModel, get_db, SessionModel, BookModel
 from auth import get_current_user, HTTPBearer
@@ -56,6 +56,48 @@ async def get_current_user_dep(credentials: HTTPBearer = Depends(security)) -> d
     return await get_current_user(credentials)
 
 
+def _format_chat_messages(raw_messages: list) -> List[ChatMessage]:
+    """Helper to safely format messages preserving both regular chats and assessments."""
+    formatted = []
+    for msg in raw_messages:
+        role = msg.get("role", "")
+        if role == "assessment":
+            formatted.append(ChatMessage(
+                role="assessment",
+                content=msg.get("content", ""),
+                timestamp=msg.get("timestamp", datetime.utcnow()),
+                assessment_id=msg.get("assessment_id"),
+                topic=msg.get("topic", "General"),
+                difficulty=msg.get("difficulty", "intermediate"),
+                mode=msg.get("mode", "topic"),
+                questions=msg.get("questions", []),
+                completed=msg.get("completed", False),
+                result=msg.get("result", None)
+            ))
+        else:
+            sources_raw = msg.get("sources", [])
+            sources = []
+            for s in sources_raw:
+                if isinstance(s, dict):
+                    sources.append(MessageSource(
+                        chunk_id=str(s.get("chunk_id", "")),
+                        book_name=str(s.get("book_name", "")),
+                        book_id=str(s.get("book_id", "")),
+                        page_range=str(s.get("page_range", "?-?")),
+                        chapter=s.get("chapter"),
+                        section=s.get("section"),
+                        relevance_score=float(s.get("relevance_score", 0.0)),
+                        formulas_cited=s.get("formulas_cited", [])
+                    ))
+            formatted.append(ChatMessage(
+                role=role,
+                content=msg.get("content", ""),
+                timestamp=msg.get("timestamp", datetime.utcnow()),
+                sources=sources
+            ))
+    return formatted
+
+
 # ============================================
 # Core Chat Query Logic (Shared)
 # ============================================
@@ -71,9 +113,7 @@ async def _process_chat_query(
 ):
     """
     Core RAG chat query processing logic (used by both old and new endpoints).
-    
-    This function encapsulates all the RAG processing steps and can be called
-    by both the legacy /chat endpoint and the new /{book_code} endpoints.
+    Retains full assessment filtering and sources reconstruction.
     """
     try:
         user_id = current_user.get("user_id")
@@ -103,14 +143,13 @@ async def _process_chat_query(
                 logger.error(f"Session lookup error: {str(e)}")
                 raise DatabaseError("session_lookup", str(e), e)
         else:
-            # automatically start a new session for a book if none specified
             if book_id:
                 try:
                     logger.info(f"Creating new session for book: {book_id}")
                     session_id = generate_chat_id()
                     SessionModel.create(
                         session_id=session_id,
-                        user_id=current_user["_id"],
+                        user_id=current_user.get("_id") or ObjectId(user_id),
                         book_id=book_id,
                         subject=(book_filters.subject if book_filters else ""),
                         department=(book_filters.department if book_filters else ""),
@@ -154,36 +193,36 @@ async def _process_chat_query(
             logger.error(f"Chat creation/retrieval error: {str(e)}")
             raise DatabaseError("chat_creation", "Failed to create or load chat", e)
 
-        # Build metadata filter for chunk retrieval
-        where_filter = None
-        if book_filters:
-            where_filter = {}
-            if book_filters.department:
-                where_filter["department"] = book_filters.department
-            if book_filters.year_of_study:
-                where_filter["year_of_study"] = book_filters.year_of_study
-            if book_filters.subject:
-                where_filter["subject"] = book_filters.subject
-
-        # Step 4: Retrieve relevant chunks from vector database
-        logger.info(f"Retrieving chunks for query: {query[:50]}...")
+        # Step 4: Retrieve relevant chunks from ChromaDB
+        logger.info(f"Retrieving chunks from ChromaDB for query: {query[:50]}...")
         try:
             vector_store = get_vector_store()
+            top_k = getattr(settings, "rag_top_k_retrieval", 5)
+
+            where_filter = {}
+            if book_filters:
+                if book_filters.department:
+                    where_filter["department"] = book_filters.department
+                if book_filters.year_of_study:
+                    where_filter["year_of_study"] = book_filters.year_of_study
+                if book_filters.subject:
+                    where_filter["subject"] = book_filters.subject
+
             documents, metadatas, embeddings, similarity_scores = vector_store.query(
                 query_text=query,
-                n_results=5,
+                n_results=top_k,
                 where_filter=where_filter if where_filter else None,
                 book_id=book_id
             )
-            logger.info(f"Retrieved {len(documents)} relevant chunks")
+            logger.info(f"Retrieved {len(documents)} relevant chunks from ChromaDB")
 
             if not documents:
-                logger.warning(f"No relevant chunks found for query")
+                logger.warning(f"No relevant chunks found for query in ChromaDB")
         except Exception as e:
             logger.error(f"Vector store retrieval error: {str(e)}")
             raise DatabaseError("vector_store_retrieval", "Failed to retrieve relevant chunks", e)
 
-        # Step 5: Load previous messages for context
+        # Step 5: Load previous messages for context (filter out assessment items)
         logger.info(f"Loading previous messages from conversation history")
         try:
             if previous_messages:
@@ -195,6 +234,7 @@ async def _process_chat_query(
                 context_messages = [
                     {"role": m["role"], "content": m["content"]}
                     for m in chat.get("messages", [])[-settings.rag_context_window_messages:]
+                    if m.get("role") in ["user", "assistant"] and m.get("content")
                 ]
             logger.info(f"Loaded {len(context_messages)} previous messages")
         except Exception as e:
@@ -221,15 +261,24 @@ async def _process_chat_query(
         try:
             sources = []
             for i, metadata in enumerate(metadatas):
+                p_start = metadata.get("page_start")
+                p_end = metadata.get("page_end")
+                if p_start is not None and p_end is not None:
+                    page_range = f"{p_start}-{p_end}"
+                else:
+                    page_range = str(metadata.get("page", "?-?"))
+
+                score = similarity_scores[i] if i < len(similarity_scores) else 0.0
+
                 sources.append(MessageSource(
-                    chunk_id=f"chunk_{i}",
-                    book_name=metadata.get("book_name", "Unknown"),
-                    book_id=metadata.get("book_id", ""),
-                    page_range=f"{metadata.get('page_start', '?')}-{metadata.get('page_end', '?')}",
+                    chunk_id=str(metadata.get("chunk_index", f"chunk_{i}")),
+                    book_name=metadata.get("book_name") or metadata.get("title") or "Unknown Book",
+                    book_id=metadata.get("book_id", book_id or ""),
+                    page_range=page_range,
                     chapter=metadata.get("chapter"),
                     section=metadata.get("section"),
-                    relevance_score=similarity_scores[i] if i < len(similarity_scores) else 0.0,
-                    formulas_cited=[f["latex"] for f in metadata.get("formulas", [])]
+                    relevance_score=round(float(score), 4),
+                    formulas_cited=[f["latex"] for f in metadata.get("formulas", [])] if isinstance(metadata.get("formulas"), list) else []
                 ))
             logger.info(f"Built {len(sources)} source references")
         except Exception as e:
@@ -239,17 +288,18 @@ async def _process_chat_query(
         # Step 8: Save messages to MongoDB
         logger.info(f"Saving messages to database")
         try:
+            now = datetime.utcnow()
             user_message = {
                 "role": "user",
                 "content": query,
-                "timestamp": datetime.utcnow(),
+                "timestamp": now,
                 "sources": []
             }
 
             assistant_message = {
                 "role": "assistant",
                 "content": rag_response["response"],
-                "timestamp": datetime.utcnow(),
+                "timestamp": now,
                 "sources": [s.dict() for s in sources]
             }
 
@@ -303,9 +353,6 @@ async def send_chat_query_for_book(
 ):
     """
     Send a query to the RAG chatbot for a specific book.
-    
-    NEW ENDPOINT: Chat queries must now specify the book_code in the URL path.
-    This replaces the generic POST /chat endpoint.
     """
     try:
         request.book_id = book_code
@@ -356,15 +403,20 @@ async def list_book_chats(
             chat_items = []
             for chat in chats_list:
                 last_message = ""
-                if chat.get("messages"):
-                    last_message = chat["messages"][-1].get("content", "")[:100]
+                for m in reversed(chat.get("messages", [])):
+                    if m.get("content"):
+                        last_message = m.get("content", "")[:100]
+                        break
+                    elif m.get("role") == "assessment":
+                        last_message = f"[Quiz: {m.get('topic', 'Topic Quiz')}]"
+                        break
 
                 chat_items.append(ChatHistoryItem(
                     chat_id=chat["chat_id"],
                     title=chat.get("title", "Untitled Chat"),
                     last_message=last_message,
                     created_at=chat["created_at"],
-                    updated_at=chat["updated_at"],
+                    updated_at=chat.get("updated_at", chat["created_at"]),
                     message_count=len(chat.get("messages", [])),
                     book_id=chat.get("book_id")
                 ))
@@ -415,22 +467,14 @@ async def get_book_chat(
             
             logger.info(f"Chat found and authorized")
 
-            messages = []
-            for msg in chat.get("messages", []):
-                messages.append({
-                    "role": msg.get("role", ""),
-                    "content": msg.get("content", ""),
-                    "timestamp": msg.get("timestamp", datetime.utcnow()),
-                    "sources": msg.get("sources", [])
-                })
-
+            messages = _format_chat_messages(chat.get("messages", []))
             book_filters = BookFilter(**chat.get("book_filters", {}))
 
             return FullChatResponse(
                 chat_id=chat["chat_id"],
                 title=chat.get("title", ""),
                 created_at=chat["created_at"],
-                updated_at=chat["updated_at"],
+                updated_at=chat.get("updated_at", chat["created_at"]),
                 book_filters=book_filters,
                 messages=messages
             )
@@ -684,7 +728,7 @@ async def send_chat_query_legacy(
 
 @router.get("/list", response_model=ChatHistoryResponse)
 async def list_user_chats_legacy(
-    limit: int = 10,
+    limit: int = 15,
     offset: int = 0,
     current_user: dict = Depends(get_current_user_dep)
 ):
@@ -709,15 +753,20 @@ async def list_user_chats_legacy(
             chat_items = []
             for chat in chats_list:
                 last_message = ""
-                if chat.get("messages"):
-                    last_message = chat["messages"][-1].get("content", "")[:100]
+                for m in reversed(chat.get("messages", [])):
+                    if m.get("content"):
+                        last_message = m.get("content", "")[:100]
+                        break
+                    elif m.get("role") == "assessment":
+                        last_message = f"[Quiz: {m.get('topic', 'Topic Quiz')}]"
+                        break
 
                 chat_items.append(ChatHistoryItem(
                     chat_id=chat["chat_id"],
                     title=chat.get("title", "Untitled Chat"),
                     last_message=last_message,
                     created_at=chat["created_at"],
-                    updated_at=chat["updated_at"],
+                    updated_at=chat.get("updated_at", chat["created_at"]),
                     message_count=len(chat.get("messages", [])),
                     book_id=chat.get("book_id")
                 ))
@@ -762,22 +811,14 @@ async def get_chat_history_legacy(
             
             logger.info(f"Chat found and authorized")
 
-            messages = []
-            for msg in chat.get("messages", []):
-                messages.append({
-                    "role": msg.get("role", ""),
-                    "content": msg.get("content", ""),
-                    "timestamp": msg.get("timestamp", datetime.utcnow()),
-                    "sources": msg.get("sources", [])
-                })
-
+            messages = _format_chat_messages(chat.get("messages", []))
             book_filters = BookFilter(**chat.get("book_filters", {}))
 
             return FullChatResponse(
                 chat_id=chat["chat_id"],
                 title=chat.get("title", ""),
                 created_at=chat["created_at"],
-                updated_at=chat["updated_at"],
+                updated_at=chat.get("updated_at", chat["created_at"]),
                 book_filters=book_filters,
                 messages=messages
             )
@@ -798,7 +839,7 @@ async def get_chat_history_legacy(
         raise DatabaseError("chat_history", "An unexpected error occurred while retrieving chat", e)
 
 
-@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{chat_id}", status_code=status.HTTP_200_OK)
 async def delete_chat_legacy(
     chat_id: str,
     current_user: dict = Depends(get_current_user_dep)
@@ -821,6 +862,7 @@ async def delete_chat_legacy(
 
             ChatModel.delete_chat(chat_id)
             logger.info(f"Chat deleted successfully: {chat_id}")
+            return {"message": "Chat deleted successfully", "chat_id": chat_id}
         except (NotFoundError, UnauthorizedError):
             raise
         except Exception as e:

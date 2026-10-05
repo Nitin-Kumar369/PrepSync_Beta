@@ -2,7 +2,12 @@
 FastAPI application entry point for RAG backend.
 Initializes all components and sets up routes.
 """
-
+import sys
+try:
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
 import logging
 import os
 from contextlib import asynccontextmanager

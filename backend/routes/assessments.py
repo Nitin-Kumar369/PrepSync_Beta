@@ -1,7 +1,6 @@
 """
 Routes for Assessment Generation, Secure Zero-Leak Grading, and Analytics.
 """
-
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
@@ -11,12 +10,13 @@ from models import (
     AssessmentSubmitRequest, AssessmentResultResponse,
     StudentAnalyticsResponse
 )
-from db import AssessmentModel, StudentAnalyticsModel
+from db import AssessmentModel, StudentAnalyticsModel, ChatModel, get_db
 from rag.assessment_engine import get_assessment_engine
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assessment", tags=["Assessment & Analytics"])
+
 
 @router.post("/generate", response_model=AssessmentResponse)
 async def generate_assessment(req: AssessmentGenerateRequest, user: dict = Depends(get_current_user)):
@@ -57,6 +57,24 @@ async def generate_assessment(req: AssessmentGenerateRequest, user: dict = Depen
             for q in quiz_data["questions"]
         ]
 
+        # Embed assessment message into chat history so it survives refreshes
+        if req.chat_id:
+            chat_message = {
+                "role": "assessment",
+                "assessment_id": quiz_data["assessment_id"],
+                "topic": quiz_data["topic"],
+                "difficulty": quiz_data.get("difficulty", req.difficulty),
+                "mode": quiz_data.get("mode", req.mode),
+                "questions": client_questions,
+                "completed": False,
+                "result": None,
+                "timestamp": datetime.utcnow()
+            }
+            try:
+                ChatModel.add_message(req.chat_id, chat_message)
+            except Exception as ce:
+                logger.warning(f"Could not link assessment to chat {req.chat_id}: {ce}")
+
         return {
             "assessment_id": quiz_data["assessment_id"],
             "book_id": req.book_id,
@@ -67,9 +85,11 @@ async def generate_assessment(req: AssessmentGenerateRequest, user: dict = Depen
             "questions": client_questions,
             "created_at": datetime.utcnow()
         }
+
     except Exception as e:
         logger.error(f"Failed to generate assessment: {str(e)}")
         raise HTTPException(status_code=500, detail="Unable to generate assessment.")
+
 
 @router.post("/submit", response_model=AssessmentResultResponse)
 async def submit_assessment(req: AssessmentSubmitRequest, user: dict = Depends(get_current_user)):
@@ -97,6 +117,29 @@ async def submit_assessment(req: AssessmentSubmitRequest, user: dict = Depends(g
         feedback=eval_result["feedback"]
     )
 
+    # Update embedded assessment record in the chat messages array
+    try:
+        db = get_db()
+        db["chats"].update_one(
+            {"messages.assessment_id": req.assessment_id},
+            {
+                "$set": {
+                    "messages.$.completed": True,
+                    "messages.$.result": {
+                        "score": eval_result["score"],
+                        "total_questions": eval_result["total_questions"],
+                        "percentage": eval_result["percentage"],
+                        "badge": eval_result["badge"],
+                        "feedback": eval_result["feedback"],
+                        "time_taken_seconds": eval_result["time_taken_seconds"],
+                        "results": eval_result["results"]
+                    }
+                }
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to update embedded chat assessment status: {e}")
+
     return {
         "assessment_id": req.assessment_id,
         "book_id": req.book_id,
@@ -109,6 +152,7 @@ async def submit_assessment(req: AssessmentSubmitRequest, user: dict = Depends(g
         "results": eval_result["results"],
         "submitted_at": datetime.utcnow()
     }
+
 
 @router.get("/analytics/student", response_model=StudentAnalyticsResponse)
 async def get_student_analytics(user: dict = Depends(get_current_user)):

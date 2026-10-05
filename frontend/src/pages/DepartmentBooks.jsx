@@ -5,17 +5,34 @@ import { useAuthStore } from '../store/authStore'
 import { Skeleton } from '../components/UI'
 import { ArrowLeft, BookOpen, Library, FileText, Layers } from 'lucide-react'
 
+// Helper to generate acronym from name
+const getAbbreviation = (name = '') => {
+  if (!name.trim()) return ''
+  const words = name.trim().split(/[\s_-]+/)
+  if (words.length === 1) return name.toUpperCase()
+  
+  const acronym = words
+    .filter(w => !['and', '&', 'of', 'in', 'to', 'for', 'the'].includes(w.toLowerCase()))
+    .map(w => w[0])
+    .join('')
+    .toUpperCase()
+
+  return acronym || words.map(w => w[0]).join('').toUpperCase()
+}
+
 export default function DepartmentBooks() {
   const { departmentName } = useParams()
   const navigate = useNavigate()
   const { user } = useAuthStore()
-
   const [years, setYears] = useState([])
   const [selectedYear, setSelectedYear] = useState(null)
   const [subjects, setSubjects] = useState([])
   const [books, setBooks] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  const deptAbbr = getAbbreviation(departmentName)
+  const isDeptAlreadyAbbr = deptAbbr.toLowerCase() === departmentName?.trim().toLowerCase()
 
   useEffect(() => {
     const fetchYears = async () => {
@@ -81,19 +98,29 @@ export default function DepartmentBooks() {
           </Link>
         </div>
 
+        {/* Department Heading with Abbreviation */}
         <section className='mb-12 flex items-center gap-4'>
-          <div className="bg-slate-100 p-4 rounded-3xl text-slate-700">
+          <div className="bg-slate-100 p-4 rounded-3xl text-slate-700 shrink-0">
             <Library className="w-8 h-8" />
           </div>
           <div>
-            <h1 className='text-4xl font-bold text-slate-900 mb-1'>{departmentName}</h1>
-            <p className='text-slate-500 font-medium'>Select an academic year and subject to view resources</p>
+            <h1 className='text-4xl font-bold text-slate-900 mb-1 tracking-tight'>
+              {deptAbbr}
+            </h1>
+            {!isDeptAlreadyAbbr && (
+              <p className='text-base font-semibold text-slate-500'>
+                {departmentName}
+              </p>
+            )}
+            <p className='text-slate-400 text-xs font-medium mt-1'>
+              Select an academic year and subject to view resources
+            </p>
           </div>
         </section>
 
         {error && (
           <div className='mb-8 p-4 bg-red-50 text-red-700 rounded-2xl border border-red-100 flex items-center gap-3 font-medium'>
-             ⚠️ {error}
+            {error}
           </div>
         )}
 
@@ -101,7 +128,7 @@ export default function DepartmentBooks() {
           <section className='mb-12'>
             <Skeleton className="w-32 h-6 mb-4" />
             <div className='flex flex-wrap gap-3'>
-               {[1, 2, 3, 4].map(i => <Skeleton key={i} className="w-28 h-12 rounded-2xl" />)}
+              {[1, 2, 3, 4].map(i => <Skeleton key={i} className="w-28 h-12 rounded-2xl" />)}
             </div>
           </section>
         )}
@@ -132,80 +159,87 @@ export default function DepartmentBooks() {
             <h2 className='text-lg font-bold mb-6 text-slate-400 tracking-wider uppercase'>Choose Subject</h2>
             
             {loading && subjects.length === 0 ? (
-               <div className="grid grid-cols-1 gap-6">
-                 {[1, 2].map(i => (
-                   <div key={i} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                      <div className="flex items-center gap-3 mb-6">
-                         <Skeleton className="w-6 h-6 circular" />
-                         <Skeleton className="w-48 h-8" />
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                         {[1, 2, 3].map(j => (
-                           <div key={j} className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
-                             <Skeleton className="w-3/4 h-6 mb-2" />
-                             <Skeleton className="w-1/2 h-4 mb-4" />
-                             <div className="flex gap-4 pt-4 border-t border-slate-200">
-                               <Skeleton className="w-16 h-4" />
-                               <Skeleton className="w-16 h-4" />
-                             </div>
-                           </div>
-                         ))}
-                      </div>
-                   </div>
-                 ))}
-               </div>
-            ) : (
-              <div className='grid grid-cols-1 gap-6'>
-                {subjects.map((subject) => (
-                  <div
-                    key={subject}
-                    className='bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer'
-                    onClick={() => fetchBooksForSubject(subject)}
-                  >
+              <div className="grid grid-cols-1 gap-6">
+                {[1, 2].map(i => (
+                  <div key={i} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                     <div className="flex items-center gap-3 mb-6">
-                      <BookOpen className="w-6 h-6 text-blue-600" />
-                      <h3 className='text-2xl font-bold text-slate-900'>{subject}</h3>
+                      <Skeleton className="w-6 h-6 circular" />
+                      <div className="space-y-1">
+                        <Skeleton className="w-24 h-7" />
+                        <Skeleton className="w-48 h-4" />
+                      </div>
                     </div>
-
-                    {loading && books.length === 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
-                        {[1, 2, 3].map(j => (
-                          <div key={j} className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
-                            <Skeleton className="w-3/4 h-6 mb-2" />
-                            <Skeleton className="w-1/2 h-4 mb-4" />
-                            <div className="flex gap-4 pt-4 border-t border-slate-200">
-                              <Skeleton className="w-16 h-4" />
-                              <Skeleton className="w-16 h-4" />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : books.length > 0 && books[0].subject === subject ? (
-                      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5'>
-                        {books.map((book) => (
-                          <div
-                            key={book.book_id}
-                            className='bg-slate-50 p-5 rounded-2xl border border-slate-200 hover:border-blue-500 hover:shadow-lg transition-all cursor-pointer group flex flex-col'
-                            onClick={(e) => { e.stopPropagation(); handleBookClick(book.book_id); }}
-                          >
-                            <h4 className='font-bold text-slate-900 text-lg mb-2 leading-tight group-hover:text-blue-700 transition-colors'>{book.title}</h4>
-                            <p className='text-sm text-slate-500 mb-4 flex-grow'>{book.author || 'Unknown Author'}</p>
-                            
-                            <div className='flex gap-4 pt-4 border-t border-slate-200 text-xs text-slate-400 font-semibold'>
-                              <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5"/> {book.total_pages || '?'} pages</span>
-                              <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5"/> {book.total_chunks || '0'} chunks</span>
-                            </div>
-                            {!user && (
-                              <p className='text-xs text-blue-600 font-bold mt-4 bg-blue-50 py-2 px-3 rounded-lg text-center'>Click to login and chat</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className='text-sm text-slate-500 font-medium'>Click to expand resources in this subject</p>
-                    )}
                   </div>
                 ))}
+              </div>
+            ) : (
+              <div className='grid grid-cols-1 gap-6'>
+                {subjects.map((subject) => {
+                  const subjAbbr = getAbbreviation(subject)
+                  const isSubjAlreadyAbbr = subjAbbr.toLowerCase() === subject.trim().toLowerCase()
+
+                  return (
+                    <div
+                      key={subject}
+                      className='bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer'
+                      onClick={() => fetchBooksForSubject(subject)}
+                    >
+                      <div className="flex items-start gap-3 mb-4">
+                        <BookOpen className="w-6 h-6 text-blue-600 shrink-0 mt-1" />
+                        <div className="min-w-0">
+                          {/* Subject Abbreviation as primary title */}
+                          <h3 className='text-2xl font-bold text-slate-900 tracking-tight leading-tight'>
+                            {subjAbbr}
+                          </h3>
+                          {/* Full Subject Name in smaller font underneath */}
+                          {!isSubjAlreadyAbbr && (
+                            <p className='text-xs font-semibold text-slate-500 mt-0.5'>
+                              {subject}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {loading && books.length === 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
+                          {[1, 2, 3].map(j => (
+                            <div key={j} className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                              <Skeleton className="w-3/4 h-6 mb-2" />
+                              <Skeleton className="w-1/2 h-4 mb-4" />
+                              <div className="flex gap-4 pt-4 border-t border-slate-200">
+                                <Skeleton className="w-16 h-4" />
+                                <Skeleton className="w-16 h-4" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : books.length > 0 && books[0].subject === subject ? (
+                        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-4'>
+                          {books.map((book) => (
+                            <div
+                              key={book.book_id}
+                              className='bg-slate-50 p-5 rounded-2xl border border-slate-200 hover:border-blue-500 hover:shadow-lg transition-all cursor-pointer group flex flex-col'
+                              onClick={(e) => { e.stopPropagation(); handleBookClick(book.book_id); }}
+                            >
+                              <h4 className='font-bold text-slate-900 text-lg mb-2 leading-tight group-hover:text-blue-700 transition-colors'>{book.title}</h4>
+                              <p className='text-sm text-slate-500 mb-4 flex-grow'>{book.author || 'Unknown Author'}</p>
+                              
+                              <div className='flex gap-4 pt-4 border-t border-slate-200 text-xs text-slate-400 font-semibold'>
+                                <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5"/> {book.total_pages || '?'} pages</span>
+                                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5"/> {book.total_chunks || '0'} chunks</span>
+                              </div>
+                              {!user && (
+                                <p className='text-xs text-blue-600 font-bold mt-4 bg-blue-50 py-2 px-3 rounded-lg text-center'>Click to login and chat</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className='text-xs text-slate-400 font-medium mt-2'>Click to expand resources in this subject</p>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </section>

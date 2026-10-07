@@ -1,75 +1,23 @@
 """
 Text extraction and recursive chunking pipeline for engineering textbooks.
-Splits text along natural structural boundaries (paragraphs, sentences)
-and sizes chunks to fit the attention context of sentence-transformer models.
 """
 import logging
 from typing import List, Dict, Any
-from pathlib import Path
 import pypdf
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
 
-
-class SimpleRecursiveSplitter:
-    """Lightweight pure-Python recursive text splitter."""
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 180, separators: List[str] = None):
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.separators = separators or ["\n\n\n", "\n\n", "\n", ". ", "; ", " ", ""]
-
-    def split_text(self, text: str) -> List[str]:
-        final_chunks = []
-        separator = self.separators[-1]
-        
-        for sep in self.separators:
-            if sep == "" or sep in text:
-                separator = sep
-                break
-
-        splits = text.split(separator) if separator != "" else list(text)
-        current_chunk = []
-        current_len = 0
-
-        for piece in splits:
-            piece_len = len(piece) + (len(separator) if separator != "" else 0)
-            if current_len + piece_len > self.chunk_size and current_chunk:
-                joined = separator.join(current_chunk).strip()
-                if joined:
-                    final_chunks.append(joined)
-                
-                # Roll back for chunk overlap
-                overlap_chars = 0
-                overlap_pieces = []
-                for p in reversed(current_chunk):
-                    if overlap_chars + len(p) <= self.chunk_overlap:
-                        overlap_pieces.insert(0, p)
-                        overlap_chars += len(p)
-                    else:
-                        break
-                current_chunk = overlap_pieces
-                current_len = sum(len(p) for p in current_chunk) + (len(separator) * max(0, len(current_chunk) - 1))
-
-            current_chunk.append(piece)
-            current_len += piece_len
-
-        if current_chunk:
-            joined = separator.join(current_chunk).strip()
-            if joined:
-                final_chunks.append(joined)
-
-        return final_chunks
-
-
 class SimpleChunkingPipeline:
-    """Text extraction and structure-aware chunking for PDFs."""
-
     def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 180):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.splitter = SimpleRecursiveSplitter(
+        self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap
+            chunk_overlap=self.chunk_overlap,
+            separators=["\n\n\n", "\n\n", "\n", ". ", "; ", " ", ""],
+            length_function=len,
+            is_separator_regex=False
         )
 
     def _extract_text(self, pdf_path: str) -> str:
@@ -123,9 +71,7 @@ class SimpleChunkingPipeline:
         logger.info(f"Split book '{book_id}' into {len(chunks)} structural chunks")
         return chunks
 
-
-_pipeline: SimpleChunkingPipeline | None = None
-
+_pipeline = None
 
 def get_chunking_pipeline() -> SimpleChunkingPipeline:
     global _pipeline
@@ -133,8 +79,6 @@ def get_chunking_pipeline() -> SimpleChunkingPipeline:
         _pipeline = SimpleChunkingPipeline()
     return _pipeline
 
-
 def init_chunking_pipeline():
     global _pipeline
     _pipeline = SimpleChunkingPipeline()
-    logger.info("Chunking pipeline initialized")

@@ -8,27 +8,68 @@ from typing import List, Dict, Any
 from pathlib import Path
 import pypdf
 
-# LangChain text splitter (from requirements.txt)
-try:
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-except ImportError:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-
 logger = logging.getLogger(__name__)
+
+
+class SimpleRecursiveSplitter:
+    """Lightweight pure-Python recursive text splitter."""
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 180, separators: List[str] = None):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.separators = separators or ["\n\n\n", "\n\n", "\n", ". ", "; ", " ", ""]
+
+    def split_text(self, text: str) -> List[str]:
+        final_chunks = []
+        separator = self.separators[-1]
+        
+        for sep in self.separators:
+            if sep == "" or sep in text:
+                separator = sep
+                break
+
+        splits = text.split(separator) if separator != "" else list(text)
+        current_chunk = []
+        current_len = 0
+
+        for piece in splits:
+            piece_len = len(piece) + (len(separator) if separator != "" else 0)
+            if current_len + piece_len > self.chunk_size and current_chunk:
+                joined = separator.join(current_chunk).strip()
+                if joined:
+                    final_chunks.append(joined)
+                
+                # Roll back for chunk overlap
+                overlap_chars = 0
+                overlap_pieces = []
+                for p in reversed(current_chunk):
+                    if overlap_chars + len(p) <= self.chunk_overlap:
+                        overlap_pieces.insert(0, p)
+                        overlap_chars += len(p)
+                    else:
+                        break
+                current_chunk = overlap_pieces
+                current_len = sum(len(p) for p in current_chunk) + (len(separator) * max(0, len(current_chunk) - 1))
+
+            current_chunk.append(piece)
+            current_len += piece_len
+
+        if current_chunk:
+            joined = separator.join(current_chunk).strip()
+            if joined:
+                final_chunks.append(joined)
+
+        return final_chunks
 
 
 class SimpleChunkingPipeline:
     """Text extraction and structure-aware chunking for PDFs."""
 
     def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 180):
-        # 1000 chars (~180-200 tokens) comfortably fits within all-MiniLM-L6-v2's 256 token ceiling
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.splitter = RecursiveCharacterTextSplitter(
+        self.splitter = SimpleRecursiveSplitter(
             chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-            separators=["\n\n\n", "\n\n", "\n", ". ", "; ", " ", ""],
-            length_function=len
+            chunk_overlap=self.chunk_overlap
         )
 
     def _extract_text(self, pdf_path: str) -> str:
@@ -54,18 +95,15 @@ class SimpleChunkingPipeline:
         year_of_study: str = "",
         subject: str = ""
     ) -> List[Dict[str, Any]]:
-        """Extract text and produce structured, bounded chunks."""
         text = self._extract_text(pdf_path)
         if not text:
             return []
 
-        # Split respecting paragraphs and sentence breaks
         split_texts = self.splitter.split_text(text)
 
         chunks = []
         for i, c in enumerate(split_texts):
             clean_text = c.strip()
-            # Omit boilerplate lines and residual page header remnants
             if len(clean_text) < 40:
                 continue
 
@@ -100,24 +138,3 @@ def init_chunking_pipeline():
     global _pipeline
     _pipeline = SimpleChunkingPipeline()
     logger.info("Chunking pipeline initialized")
-
-
-if __name__ == "__main__":
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    pipeline = get_chunking_pipeline()
-    test_pdf = "./test_book.pdf"
-    if Path(test_pdf).exists():
-        chunks = pipeline.process_book(
-            pdf_path=test_pdf,
-            book_id="test_001",
-            book_name="Test Book",
-            department="Computer Science",
-            year_of_study="2nd",
-            subject="Algorithms",
-        )
-        print(f"Created {len(chunks)} chunks")
-        if chunks:
-            print(f"First chunk: {chunks[0]}")
-    else:
-        print(f"Test PDF not found at {test_pdf}")

@@ -8,7 +8,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
-        changeOrigin: true
+        changeOrigin: true,
+        timeout: 120000
         	
           // Do NOT rewrite the path; keep `/api` so backend routes like
           // `/api/books/*` are reached as-is.

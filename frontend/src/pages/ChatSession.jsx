@@ -3,12 +3,13 @@ import { useParams, useNavigate, useLocation, useSearchParams } from 'react-rout
 import API from '../store/authStore'
 import ChatSidebar from '../components/ChatSidebar'
 import AssessmentCard from '../components/AssessmentCard'
+import VisualCard from '../components/VisualCard'
 import Button from '../components/UI/Button'
 import Modal from '../components/UI/Modal'
 import { useChatStore } from '../store/chatStore'
-import { 
-  Menu, ChevronDown, Send, Loader2, BookOpen, MessageSquare, 
-  Award, Sparkles, SlidersHorizontal 
+import {
+  Menu, ChevronDown, Send, Loader2, BookOpen, MessageSquare,
+  Award, Sparkles, SlidersHorizontal, GitBranch
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
@@ -29,13 +30,13 @@ export default function ChatSession() {
 
   const [book, setBook] = useState(bookFromState || null)
   const { setCurrentBook, addMessage } = useChatStore()
-  
+
   const [query, setQuery] = useState(prefilledQuery || '')
   const [loading, setLoading] = useState(false)
   const [messages, setMessages] = useState([])
   const [error, setError] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  
+
   const [currentChatId, setCurrentChatId] = useState(queryChatId || null)
   const [showBookSelector, setShowBookSelector] = useState(false)
   const [availableBooks, setAvailableBooks] = useState([])
@@ -52,6 +53,12 @@ export default function ChatSession() {
     question_type: 'single_choice'
   })
 
+  // Visual Engine States
+  const [visualLoading, setVisualLoading] = useState(false)
+  const [showVisualModal, setShowVisualModal] = useState(false)
+  const [visualPrompt, setVisualPrompt] = useState('')
+  const [visualPreference, setVisualPreference] = useState('auto')
+
   const messagesEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -60,9 +67,8 @@ export default function ChatSession() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages, loading])
+  }, [messages, loading, visualLoading])
 
-  // Sync state if URL search parameters update
   useEffect(() => {
     const urlCid = searchParams.get('chat_id')
     if (urlCid !== currentChatId) {
@@ -88,7 +94,6 @@ export default function ChatSession() {
     }
   }
 
-  // Load chat items when chat_id or session_id changes
   useEffect(() => {
     if (currentChatId && bookId) {
       fetchChatHistory(currentChatId)
@@ -107,9 +112,8 @@ export default function ChatSession() {
     try {
       const res = await API.get(`/chat/${bookId}/chats/${cid}`)
       const rawMessages = res.data.messages || []
-      // Historic assessments collapsed by default
       const processed = rawMessages.map(m => {
-        if (m.role === 'assessment') {
+        if (m.role === 'assessment' || m.role === 'visual') {
           return { ...m, isExpanded: false }
         }
         return m
@@ -130,7 +134,7 @@ export default function ChatSession() {
       const res = await API.get(`/chat/${bookId}/sessions/${sid}`)
       const rawMessages = res.data.messages || []
       const processed = rawMessages.map(m => {
-        if (m.role === 'assessment') {
+        if (m.role === 'assessment' || m.role === 'visual') {
           return { ...m, isExpanded: false }
         }
         return m
@@ -170,24 +174,28 @@ export default function ChatSession() {
     }
   }
 
+  const ensureActiveChatId = async () => {
+    let activeCid = currentChatId
+    if (!activeCid) {
+      let sid = currentSessionId
+      if (!sid) {
+        sid = await startNewSession(bookId)
+        fetchSessions(bookId)
+      }
+      activeCid = sid
+      setCurrentChatId(activeCid)
+      setSearchParams({ chat_id: activeCid })
+    }
+    return activeCid
+  }
+
   // --- Centralized launchQuiz Handler ---
   const launchQuiz = async (options = {}) => {
+    setShowConfigModal(false)
     setQuizLoading(true)
     setError(null)
     try {
-      let activeCid = currentChatId
-      if (!activeCid) {
-        let sid = currentSessionId
-        if (!sid) {
-          sid = await startNewSession(bookId)
-          fetchSessions(bookId)
-        }
-        activeCid = sid
-        setCurrentChatId(activeCid)
-        setSearchParams({ chat_id: activeCid })
-      }
-
-      // Determine robust topic: explicit topic passed > book subject > fallback
+      const activeCid = await ensureActiveChatId()
       const chosenTopic = options.topic || book?.subject || 'Core Concepts'
 
       const payload = {
@@ -203,8 +211,7 @@ export default function ChatSession() {
       }
 
       const res = await API.post('/assessment/generate', payload)
-      
-      // Append fresh test in expanded state into the chat stream
+
       const newAssessmentItem = {
         role: 'assessment',
         assessment_id: res.data.assessment_id,
@@ -218,7 +225,6 @@ export default function ChatSession() {
         timestamp: new Date().toISOString()
       }
       setMessages(prev => [...prev, newAssessmentItem])
-      setShowConfigModal(false)
       setRefreshSidebar(prev => prev + 1)
     } catch (e) {
       setError('Failed to generate in-chat quiz.')
@@ -227,9 +233,71 @@ export default function ChatSession() {
     }
   }
 
+  // --- Centralized launchVisual Handler (auto-closes modal immediately) ---
+  const launchVisual = async (options = {}) => {
+    const promptToSend = options.query !== undefined ? options.query : visualPrompt
+    const prefToSend = options.visual_preference || visualPreference
+
+    // Close modal immediately and clear drafts for a clean UX
+    setShowVisualModal(false)
+    setVisualPrompt('')
+    setVisualLoading(true)
+    setError(null)
+
+    try {
+      const activeCid = await ensureActiveChatId()
+
+      const payload = {
+        book_id: bookId,
+        chat_id: activeCid,
+        query: promptToSend,
+        mode: options.mode || 'query',
+        visual_preference: prefToSend,
+        context_text: options.contextText || null
+      }
+
+      const res = await API.post('/visual/generate', payload)
+
+      const newVisualItem = {
+        role: 'visual',
+        visual_id: res.data.visual_id,
+        mode: res.data.mode,
+        visual: res.data.visual,
+        isExpanded: true,
+        timestamp: new Date().toISOString()
+      }
+
+      setMessages(prev => [...prev, newVisualItem])
+      setRefreshSidebar(prev => prev + 1)
+    } catch (e) {
+      setError('Failed to generate visual diagram/chart.')
+    } finally {
+      setVisualLoading(false)
+    }
+  }
+
+  const openVisualModal = () => {
+    if (query.trim()) {
+      setVisualPrompt(query.trim())
+      setQuery('')
+    }
+    setShowVisualModal(true)
+  }
+
   const sendQuery = async (customQuery = null) => {
-    const textToSend = customQuery || query
-    if (!textToSend.trim() || !book) return
+    const textToSend = (customQuery || query).trim()
+    if (!textToSend || !book) return
+
+    // Slash command shortcuts
+    if (/^\/(diagram|graph|chart|packet|sequence|layers)\b/i.test(textToSend)) {
+      const cmd = textToSend.match(/^\/(\w+)/i)[1].toLowerCase()
+      const prefMap = { graph: 'chart', chart: 'chart', packet: 'packet', sequence: 'sequence', layers: 'layers', diagram: 'auto' }
+      const stripped = textToSend.replace(/^\/\w+\s*/i, '').trim()
+      setQuery('')
+      await launchVisual({ mode: 'query', query: stripped, visual_preference: prefMap[cmd] || 'auto' })
+      return
+    }
+
     setLoading(true)
     try {
       let sessionId = currentSessionId
@@ -239,13 +307,12 @@ export default function ChatSession() {
       }
 
       const payload = {
-        query: textToSend.trim(),
+        query: textToSend,
         book_id: bookId,
         chat_id: currentChatId || undefined,
         session_id: sessionId || undefined
       }
 
-      // Collect chat history, skipping assessment cards
       const recent = []
       messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -317,8 +384,8 @@ export default function ChatSession() {
       const isInline = !String(children).includes('\n') && !className?.includes('language-')
       if (isInline) {
         return (
-          <code 
-            className="px-1.5 py-0.5 mx-0.5 rounded-md font-mono text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200" 
+          <code
+            className="px-1.5 py-0.5 mx-0.5 rounded-md font-mono text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200"
             {...props}
           >
             {children}
@@ -381,7 +448,7 @@ export default function ChatSession() {
         <div className='bg-white border-b border-slate-200 p-4 z-10 flex-shrink-0'>
           <div className='flex items-center justify-between max-w-4xl mx-auto'>
             <div className='flex items-center gap-3'>
-              <button 
+              <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="p-2 -ml-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full transition-colors md:hidden"
               >
@@ -398,9 +465,9 @@ export default function ChatSession() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* TRIGGER 1: Top Header "Chapter Quiz" */}
+              {/* Chapter Quiz Trigger */}
               <button
-                onClick={() => launchQuiz({ 
+                onClick={() => launchQuiz({
                   mode: 'topic',
                   topic: book?.subject || 'Core Concepts',
                   num_questions: configParams.num_questions,
@@ -443,8 +510,8 @@ export default function ChatSession() {
                             key={b.book_id}
                             onClick={() => handleSelectBook(b)}
                             className={`block w-full text-left px-5 py-3.5 transition-colors border-b border-slate-100 dark:border-[#333333] last:border-b-0 ${
-                              isCurrent 
-                                ? 'bg-blue-50/80 dark:bg-[#007acc]/20 hover:bg-blue-100/70 dark:hover:bg-[#007acc]/30' 
+                              isCurrent
+                                ? 'bg-blue-50/80 dark:bg-[#007acc]/20 hover:bg-blue-100/70 dark:hover:bg-[#007acc]/30'
                                 : 'hover:bg-slate-50 dark:hover:bg-[#2a2d2e]'
                             }`}
                           >
@@ -480,13 +547,13 @@ export default function ChatSession() {
               </div>
               <h2 className="text-2xl font-bold text-slate-900 mb-2">How can I help?</h2>
               <p className="text-slate-500 font-medium leading-relaxed">
-                Ask a question about <span className="text-slate-900 font-bold">{book.title}</span>. When ready, click <span className="font-semibold text-blue-600">Quiz me on this response</span> to test your understanding.
+                Ask a question about <span className="text-slate-900 font-bold">{book.title}</span>, or use the{' '}
+                <span className="text-indigo-600 font-semibold">Visualize</span> button in the input bar to generate flowcharts, packet headers, stacks, or graphs.
               </p>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-6 pb-8">
               {messages.map((item, i) => {
-                // Assessment Card within chat
                 if (item.role === 'assessment') {
                   return (
                     <AssessmentCard
@@ -494,12 +561,9 @@ export default function ChatSession() {
                       quiz={item}
                       bookId={bookId}
                       initialExpanded={item.isExpanded ?? false}
-                      onAskFollowup={(remediationPrompt) => {
-                        sendQuery(remediationPrompt)
-                      }}
-                      /* TRIGGER 2: Retake Test on an existing assessment card */
-                      onRetest={() => launchQuiz({ 
-                        mode: item.mode || 'topic', 
+                      onAskFollowup={(remediationPrompt) => sendQuery(remediationPrompt)}
+                      onRetest={() => launchQuiz({
+                        mode: item.mode || 'topic',
                         topic: item.topic || book?.subject || 'Core Concepts',
                         num_questions: configParams.num_questions,
                         difficulty: configParams.difficulty,
@@ -509,7 +573,22 @@ export default function ChatSession() {
                   )
                 }
 
-                // Regular User / Assistant Messages
+                if (item.role === 'visual') {
+                  return (
+                    <VisualCard
+                      key={item.visual_id || i}
+                      item={item}
+                      initialExpanded={item.isExpanded ?? false}
+                      onAskAboutNode={(label) => sendQuery(`Explain "${label}" in detail with an example.`)}
+                      onRegenerate={() => launchVisual({
+                        mode: item.mode || 'query',
+                        query: item.visual?.title || '',
+                        visual_preference: item.visual?.kind || 'auto'
+                      })}
+                    />
+                  )
+                }
+
                 return (
                   <div key={i} className="space-y-4">
                     {item.role === 'user' && (
@@ -527,8 +606,8 @@ export default function ChatSession() {
                             <BookOpen className="w-4 h-4" />
                           </div>
                           <div className="max-w-[90%] sm:max-w-[85%] text-slate-800 text-[15px] leading-relaxed break-words">
-                            <ReactMarkdown 
-                              remarkPlugins={[remarkMath, remarkGfm]} 
+                            <ReactMarkdown
+                              remarkPlugins={[remarkMath, remarkGfm]}
                               rehypePlugins={[rehypeKatex]}
                               components={MarkdownComponents}
                             >
@@ -537,8 +616,8 @@ export default function ChatSession() {
                           </div>
                         </div>
 
-                        {/* TRIGGER 3: Inline "Quiz me on this response" Chip */}
-                        <div className="flex justify-start pl-13">
+                        {/* Inline Action Chips */}
+                        <div className="flex flex-wrap justify-start gap-2 pl-13">
                           <button
                             onClick={() => launchQuiz({
                               mode: 'post_response',
@@ -554,6 +633,20 @@ export default function ChatSession() {
                             <Sparkles className="w-3.5 h-3.5 text-blue-600" />
                             <span>Quiz me on this response</span>
                           </button>
+
+                          <button
+                            onClick={() => launchVisual({
+                              mode: 'post_response',
+                              query: 'Visualize this explanation clearly',
+                              contextText: item.content,
+                              visual_preference: 'auto'
+                            })}
+                            disabled={visualLoading}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-semibold rounded-full text-xs transition shadow-sm"
+                          >
+                            <GitBranch className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Visualize this</span>
+                          </button>
                         </div>
                       </div>
                     )}
@@ -561,13 +654,13 @@ export default function ChatSession() {
                 )
               })}
 
-              {loading && (
+              {(loading || visualLoading) && (
                 <div className='flex justify-start items-center gap-4'>
                   <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0 border border-slate-200">
                     <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
                   </div>
                   <div className='text-[14px] text-slate-500 font-medium'>
-                    Analyzing textbook...
+                    {visualLoading ? 'Generating interactive visual...' : 'Analyzing textbook...'}
                   </div>
                 </div>
               )}
@@ -576,7 +669,7 @@ export default function ChatSession() {
           )}
         </div>
 
-        {/* Bottom Input Area */}
+        {/* Bottom Input Area (Gemini-style right action cluster) */}
         <div className="bg-white pb-6 pt-3 px-4 flex-shrink-0 border-t border-slate-200">
           <div className="max-w-3xl mx-auto">
             {error && (
@@ -584,25 +677,36 @@ export default function ChatSession() {
                 {error}
               </div>
             )}
-            <div className="bg-slate-50 rounded-3xl border border-slate-200 p-2 flex flex-col sm:flex-row gap-2 transition-all shadow-sm focus-within:bg-white focus-within:border-blue-500">
+            <div className="bg-slate-50 rounded-3xl border border-slate-200 p-2 flex items-end gap-2 transition-all shadow-sm focus-within:bg-white focus-within:border-blue-500">
               <textarea
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyPress}
-                placeholder="Ask about this book..."
+                placeholder="Ask about this book, or click Visualize..."
                 className="flex-1 p-3 bg-transparent focus:outline-none resize-none text-slate-900 placeholder-slate-400 text-[15px]"
                 rows={1}
-                disabled={loading}
+                disabled={loading || visualLoading}
               />
-              <div className="flex items-end justify-end p-1">
-                <Button 
-                  onClick={() => sendQuery()} 
-                  disabled={loading || !query.trim()}
+              <div className="flex items-center gap-1.5 p-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={openVisualModal}
+                  disabled={loading || visualLoading}
+                  title="Generate diagram, packet header, stack, or graph"
+                  className="h-11 px-3.5 rounded-full flex items-center gap-1.5 bg-white dark:bg-[#252526] border border-slate-200 dark:border-[#3a3a3a] text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:border-indigo-300 text-xs font-semibold transition-all shadow-xs disabled:opacity-40"
+                >
+                  <GitBranch className="w-4 h-4" />
+                  <span className="hidden sm:inline">Visualize</span>
+                </button>
+
+                <Button
+                  onClick={() => sendQuery()}
+                  disabled={loading || visualLoading || !query.trim()}
                   className={`rounded-full w-11 h-11 p-0 flex items-center justify-center transition-all ${
-                    query.trim() && !loading ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : 'bg-slate-200 text-slate-400'
+                    query.trim() && !loading && !visualLoading ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : 'bg-slate-200 text-slate-400'
                   }`}
                 >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5 ml-0.5" />}
+                  {loading || visualLoading ? <Loader2 className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5 ml-0.5" />}
                 </Button>
               </div>
             </div>
@@ -629,8 +733,8 @@ export default function ChatSession() {
                   key={count}
                   onClick={() => setConfigParams(p => ({ ...p, num_questions: count }))}
                   className={`py-2 rounded-xl border text-xs font-bold transition-all ${
-                    configParams.num_questions === count 
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                    configParams.num_questions === count
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
@@ -652,8 +756,8 @@ export default function ChatSession() {
                   key={tier.id}
                   onClick={() => setConfigParams(p => ({ ...p, difficulty: tier.id }))}
                   className={`py-2 rounded-xl border text-xs font-bold transition-all ${
-                    configParams.difficulty === tier.id 
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                    configParams.difficulty === tier.id
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
@@ -667,17 +771,87 @@ export default function ChatSession() {
             <Button variant="secondary" onClick={() => setShowConfigModal(false)} className="rounded-full text-xs px-5">
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => launchQuiz({
                 mode: 'custom',
                 topic: book?.subject || 'Custom Exam',
                 num_questions: configParams.num_questions,
                 difficulty: configParams.difficulty,
                 question_type: configParams.question_type
-              })} 
+              })}
               className="rounded-full text-xs px-6 bg-blue-600 hover:bg-blue-700 text-white"
             >
               Launch Test
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal for Visual Generator */}
+      <Modal
+        isOpen={showVisualModal}
+        onClose={() => setShowVisualModal(false)}
+        title="Generate Visual"
+        size="md"
+      >
+        <div className="space-y-5 text-sm">
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1.5 text-xs uppercase tracking-wider">
+              What should I visualize?
+            </label>
+            <textarea
+              value={visualPrompt}
+              onChange={(e) => setVisualPrompt(e.target.value)}
+              rows={3}
+              placeholder="e.g., IPv6 datagram header, TCP 3-way handshake, OSI 7 layers, or Big-O growth curves..."
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm resize-none"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Leave blank to visualize the current chat discussion automatically.
+            </p>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1.5 text-xs uppercase tracking-wider">
+              Visual Format
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'auto', label: 'Auto Select' },
+                { id: 'packet', label: 'Header / Bits' },
+                { id: 'diagram', label: 'Flow / Block' },
+                { id: 'sequence', label: 'Sequence' },
+                { id: 'layers', label: 'Layered Stack' },
+                { id: 'chart', label: 'Data / Graph' }
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => setVisualPreference(opt.id)}
+                  className={`py-2 px-2 rounded-xl border text-xs font-bold transition-all ${
+                    visualPreference === opt.id
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4 border-t flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowVisualModal(false)} className="rounded-full text-xs px-5">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => launchVisual({
+                mode: 'query',
+                query: visualPrompt,
+                visual_preference: visualPreference
+              })}
+              className="rounded-full text-xs px-6 bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              Generate Visual
             </Button>
           </div>
         </div>

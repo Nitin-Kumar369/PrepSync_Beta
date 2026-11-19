@@ -132,7 +132,7 @@ class GeminiLLM:
             }
 
         try:
-            model_name = "gemini-3.6-flash"
+            model_name = "gemini-3.5-flash-lite"
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
             headers = {
                 "Content-Type": "application/json",

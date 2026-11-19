@@ -74,6 +74,17 @@ def _format_chat_messages(raw_messages: list) -> List[ChatMessage]:
                 completed=msg.get("completed", False),
                 result=msg.get("result", None)
             ))
+
+        elif role == "visual":
+            visual_obj = msg.get("visual") or {}
+            formatted.append(ChatMessage(
+                role="visual",
+                content=visual_obj.get("summary", ""),
+                timestamp=msg.get("timestamp", datetime.utcnow()),
+                visual_id=msg.get("visual_id"),
+                mode=msg.get("mode", "query"),
+                visual=visual_obj
+            ))
         else:
             sources_raw = msg.get("sources", [])
             sources = []
@@ -409,6 +420,10 @@ async def list_book_chats(
                         break
                     elif m.get("role") == "assessment":
                         last_message = f"[Quiz: {m.get('topic', 'Topic Quiz')}]"
+                        break
+                    elif m.get("role") == "visual":
+                        v_title = (m.get("visual") or {}).get("title", "Diagram")
+                        last_message = f"[Visual: {v_title}]"
                         break
 
                 chat_items.append(ChatHistoryItem(
@@ -759,6 +774,10 @@ async def list_user_chats_legacy(
                         break
                     elif m.get("role") == "assessment":
                         last_message = f"[Quiz: {m.get('topic', 'Topic Quiz')}]"
+                        break
+                    elif m.get("role") == "visual":
+                        v_title = (m.get("visual") or {}).get("title", "Diagram")
+                        last_message = f"[Visual: {v_title}]"
                         break
 
                 chat_items.append(ChatHistoryItem(

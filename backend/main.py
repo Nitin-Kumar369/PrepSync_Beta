@@ -156,7 +156,7 @@ async def health_check():
 from routes import auth, chat, admin, books, profile
 from routes import admin_extensions
 from routes import assessments
-
+from routes import visuals
 
 app.include_router(auth.router)
 # Provide `/api` aliases for frontend convenience (frontend prefixes requests with `/api`)
@@ -178,6 +178,10 @@ app.include_router(books.router, prefix="/api")
 
 app.include_router(assessments.router)
 app.include_router(assessments.router, prefix="/api")
+
+app.include_router(visuals.router)
+app.include_router(visuals.router, prefix="/api")
+
 # ============================================
 # Error Handlers
 # ============================================

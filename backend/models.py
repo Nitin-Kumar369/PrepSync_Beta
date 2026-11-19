@@ -92,6 +92,10 @@ class ChatMessage(BaseModel):
     completed: Optional[bool] = False
     result: Optional[Dict[str, Any]] = None
 
+    # Embedded visual fields
+    visual_id: Optional[str] = None
+    visual: Optional[Dict[str, Any]] = None
+
 
 class BookFilter(BaseModel):
     """Filter for book retrieval."""
@@ -512,3 +516,24 @@ class StudentAnalyticsResponse(BaseModel):
     adaptive_recommendations: List[AdaptiveRecommendation]
     top_explored_tags: List[str]
     last_active: Optional[datetime] = None
+
+# ============================================
+# Visual Generation Models (Diagrams & Charts)
+# ============================================
+
+class VisualGenerateRequest(BaseModel):
+    book_id: str
+    chat_id: Optional[str] = None
+    query: Optional[str] = ""
+    mode: str = Field(default="query")  # "query" | "post_response"
+    visual_preference: str = Field(default="auto")  # "auto" | "diagram" | "chart"
+    context_text: Optional[str] = None
+
+
+class VisualResponse(BaseModel):
+    visual_id: str
+    book_id: str
+    chat_id: Optional[str] = None
+    mode: str
+    visual: Dict[str, Any]
+    created_at: datetime

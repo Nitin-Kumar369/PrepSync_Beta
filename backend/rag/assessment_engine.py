@@ -15,29 +15,27 @@ from db import ChatModel, BookModel, StudentAnalyticsModel
 logger = logging.getLogger(__name__)
 
 ACTIVE_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-flash-latest"
+    "gemini-3.5-flash"
 ]
 
 
 def extract_topic_from_text(text: str, fallback: str) -> str:
     """Heuristic to extract a clean topic title from text if LLM call fails."""
-    # Check for Markdown headers like ## Topic
     header_match = re.search(r'#+\s*([A-Za-z0-9\s\-_/]{3,35})', text)
     if header_match:
         candidate = header_match.group(1).strip()
         if len(candidate) > 2:
             return candidate
 
-    # Check for bold introductory terms like **OSI Model**
     bold_match = re.search(r'\*\*([A-Za-z0-9\s\-_/]{3,30})\*\*', text)
     if bold_match:
         candidate = bold_match.group(1).strip()
         if len(candidate) > 2:
             return candidate
 
-    # First non-empty sentence or fallback
     first_line = text.strip().split('\n')[0]
     words = re.findall(r'[A-Za-z0-9]+', first_line)
     if words and len(words) >= 2:
@@ -121,7 +119,7 @@ class AssessmentEngine:
         self.api_key = settings.gemini_api_key
 
     def _call_gemini_raw(self, prompt: str, target_tokens: int = 4096) -> str:
-        """Calls Gemini API with dynamic token budget based on question volume."""
+        """Calls Gemini API with 2-pass multi-model failover."""
         headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": self.api_key
@@ -135,28 +133,31 @@ class AssessmentEngine:
             ],
             "generationConfig": {
                 "temperature": 0.2,
-                "maxOutputTokens": target_tokens,
-                "thinkingConfig": {
-                    "thinkingBudget": 0
-                }
+                "maxOutputTokens": target_tokens
             }
         }
 
         last_error = None
-        for model_name in ACTIVE_MODELS:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-            for attempt in range(1, 3):
+        for pass_num in range(2):
+            for model_name in ACTIVE_MODELS:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
                 try:
-                    logger.info(f"Generating assessment ({target_tokens} token ceiling) using {model_name}...")
-                    res = requests.post(url, headers=headers, json=payload, timeout=75)
-                    
-                    if res.status_code in [500, 503, 429]:
-                        time.sleep(2)
+                    logger.info(f"Generating assessment ({target_tokens} token ceiling) using {model_name} (pass {pass_num + 1})...")
+                    res = requests.post(url, headers=headers, json=payload, timeout=60)
+
+                    if res.status_code in [429, 500, 503]:
+                        last_error = Exception(f"{model_name} HTTP {res.status_code}: {res.text[:200]}")
+                        logger.warning(f"Transient error on {model_name}: HTTP {res.status_code}")
                         continue
-                    
+
+                    if res.status_code in [400, 404]:
+                        last_error = Exception(f"{model_name} HTTP {res.status_code}: {res.text[:200]}")
+                        logger.warning(f"Skipping {model_name}: HTTP {res.status_code}")
+                        continue
+
                     res.raise_for_status()
                     data = res.json()
-                    
+
                     candidates = data.get("candidates", [])
                     if candidates and "content" in candidates[0]:
                         parts = candidates[0]["content"].get("parts", [])
@@ -165,7 +166,9 @@ class AssessmentEngine:
                 except Exception as e:
                     last_error = e
                     logger.warning(f"Assessment generation error on {model_name}: {str(e)}")
-                    time.sleep(1.5)
+
+            if pass_num == 0:
+                time.sleep(3)
 
         raise last_error or Exception("Failed to query Gemini model.")
 
@@ -213,7 +216,7 @@ class AssessmentEngine:
         scoped_context = ""
         resolved_topic = base_fallback_topic
 
-        # MODE 1: Post-response check (Extract true topic from the assistant's previous message)
+        # MODE 1: Post-response check
         if mode == "post_response" and context_text:
             resolved_topic = self._determine_specific_topic(context_text, base_fallback_topic)
             scoped_context = f"Relevant Assistant Response:\n{context_text.strip()}"
@@ -242,7 +245,6 @@ class AssessmentEngine:
             if chat_history_lines:
                 scoped_context = "Active Chat Discussion:\n" + "\n".join(chat_history_lines)
                 if not topic:
-                    # Dynamically name the chapter quiz based on recent conversation text
                     recent_text = "\n".join(chat_history_lines[-4:])
                     resolved_topic = self._determine_specific_topic(recent_text, base_fallback_topic)
             else:
@@ -370,6 +372,7 @@ EXPLANATION: Pedagogical explanation of why this choice is correct.
 
 
 _assessment_engine = None
+
 
 def get_assessment_engine() -> AssessmentEngine:
     global _assessment_engine

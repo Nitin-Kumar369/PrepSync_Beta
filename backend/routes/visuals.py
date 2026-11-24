@@ -16,7 +16,7 @@ router = APIRouter(prefix="/visual", tags=["Visuals"])
 
 @router.post("/generate", response_model=VisualResponse)
 async def generate_visual(req: VisualGenerateRequest, user: dict = Depends(get_current_user)):
-    """Generates an interactive diagram or chart scoped to the active chat and textbook."""
+    """Generates an interactive diagram/chart or returns a subject-scope refusal."""
     try:
         engine = get_visual_engine()
         result = engine.generate_visual(
@@ -29,26 +29,39 @@ async def generate_visual(req: VisualGenerateRequest, user: dict = Depends(get_c
             context_text=req.context_text
         )
 
-        # Persist inside chat messages so it survives page refreshes
+        visual_spec = result["visual"]
+        is_refusal = visual_spec.get("kind") == "refusal"
+        refusal_text = visual_spec.get("summary", "") if is_refusal else None
+
         if req.chat_id:
-            chat_message = {
-                "role": "visual",
-                "visual_id": result["visual_id"],
-                "mode": result["mode"],
-                "visual": result["visual"],
-                "timestamp": datetime.utcnow()
-            }
+            if is_refusal:
+                chat_message = {
+                    "role": "assistant",
+                    "content": refusal_text,
+                    "timestamp": datetime.utcnow(),
+                    "sources": []
+                }
+            else:
+                chat_message = {
+                    "role": "visual",
+                    "visual_id": result["visual_id"],
+                    "mode": result["mode"],
+                    "visual": visual_spec,
+                    "timestamp": datetime.utcnow()
+                }
             try:
                 ChatModel.add_message(req.chat_id, chat_message)
             except Exception as ce:
-                logger.warning(f"Could not link visual to chat {req.chat_id}: {ce}")
+                logger.warning(f"Could not link visual response to chat {req.chat_id}: {ce}")
 
         return {
             "visual_id": result["visual_id"],
             "book_id": req.book_id,
             "chat_id": req.chat_id,
             "mode": result["mode"],
-            "visual": result["visual"],
+            "refused": is_refusal,
+            "refusal_message": refusal_text,
+            "visual": {} if is_refusal else visual_spec,
             "created_at": datetime.utcnow()
         }
     except Exception as e:

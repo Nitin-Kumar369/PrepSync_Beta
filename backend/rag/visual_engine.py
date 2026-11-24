@@ -6,6 +6,7 @@ Supports 5 structured visual kinds:
   - sequence: Protocol handshakes, message passing, timing interactions
   - layers:   Protocol stacks, OSI/TCP-IP, memory hierarchy, layered architectures
   - chart:    Quantitative line, area, and bar graphs (Recharts)
+Plus subject-scope refusals when the requested visual is outside the book's subject.
 """
 
 import json
@@ -21,9 +22,10 @@ from rag.vector_store import get_vector_store
 logger = logging.getLogger(__name__)
 
 ACTIVE_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-flash-latest"
+    "gemini-3.5-flash"
 ]
 
 VALID_VARIANTS = {"start", "process", "decision", "data", "highlight"}
@@ -32,14 +34,30 @@ VALID_COLORS = {"blue", "indigo", "emerald", "amber", "violet", "rose", "cyan", 
 DEFAULT_HEX_COLORS = ["#3b82f6", "#6366f1", "#10b981", "#f59e0b", "#ef4444"]
 
 
-def _sanitize_visual_spec(spec: Dict[str, Any], fallback_title: str) -> Optional[Dict[str, Any]]:
-    """Validates and normalizes Gemini JSON output across all 5 visual kinds."""
+def _sanitize_visual_spec(
+    spec: Dict[str, Any],
+    fallback_title: str,
+    book_title: str = "this textbook",
+    book_subject: str = "this subject"
+) -> Optional[Dict[str, Any]]:
+    """Validates and normalizes Gemini JSON output across all 5 visual kinds + refusal."""
     if not isinstance(spec, dict):
         return None
 
     kind = str(spec.get("kind", "")).lower().strip()
     title = str(spec.get("title") or fallback_title).strip()[:80]
     summary = str(spec.get("summary") or "Visual representation generated from textbook context.").strip()
+
+    if kind == "refusal":
+        default_msg = (
+            f"This visual request falls outside the scope of {book_title} ({book_subject}). "
+            f"Please ask for a diagram or graph related to {book_subject}."
+        )
+        return {
+            "kind": "refusal",
+            "title": title or "Out of Subject Scope",
+            "summary": summary if spec.get("summary") else default_msg
+        }
 
     # 1. FLOW / BLOCK DIAGRAM
     if kind == "diagram":
@@ -279,21 +297,28 @@ class VisualEngine:
             "generationConfig": {
                 "temperature": 0.15,
                 "maxOutputTokens": target_tokens,
-                "responseMimeType": "application/json",
-                "thinkingConfig": {"thinkingBudget": 0}
+                "responseMimeType": "application/json"
             }
         }
 
         last_error = None
-        for model_name in ACTIVE_MODELS:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-            for _ in range(2):
+        for pass_num in range(2):
+            for model_name in ACTIVE_MODELS:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
                 try:
-                    logger.info(f"Generating visual spec using {model_name}...")
-                    res = requests.post(url, headers=headers, json=payload, timeout=60)
-                    if res.status_code in [500, 503, 429]:
-                        time.sleep(2)
+                    logger.info(f"Generating visual spec using {model_name} (pass {pass_num + 1})...")
+                    res = requests.post(url, headers=headers, json=payload, timeout=45)
+
+                    if res.status_code in [429, 500, 503]:
+                        last_error = Exception(f"{model_name} HTTP {res.status_code}: {res.text[:200]}")
+                        logger.warning(f"Transient error on {model_name}: HTTP {res.status_code}")
                         continue
+
+                    if res.status_code in [400, 404]:
+                        last_error = Exception(f"{model_name} HTTP {res.status_code}: {res.text[:200]}")
+                        logger.warning(f"Skipping {model_name}: HTTP {res.status_code}")
+                        continue
+
                     res.raise_for_status()
                     data = res.json()
                     candidates = data.get("candidates", [])
@@ -304,7 +329,9 @@ class VisualEngine:
                 except Exception as e:
                     last_error = e
                     logger.warning(f"Visual generation error on {model_name}: {e}")
-                    time.sleep(1.5)
+
+            if pass_num == 0:
+                time.sleep(3)
 
         raise last_error or Exception("Failed to generate visual JSON from Gemini.")
 
@@ -364,7 +391,7 @@ class VisualEngine:
         user_req = query.strip() or "Visualize the core concept from the current discussion."
         fallback_title = query[:50].strip() or f"{ctx['book_subject']} Overview"
 
-        prompt = f"""You are an expert engineering textbook illustrator. Choose the MOST ACCURATE visual format for the concept and return strictly ONE JSON object matching its schema.
+        prompt = f"""You are an expert engineering textbook illustrator. Choose the MOST ACCURATE visual format for the concept and return strictly ONE JSON object matching its schema. The visual must be highly explanatory and teach the concept on its own.
 
 User Request: {user_req}
 Requested Format: {visual_preference}
@@ -375,6 +402,15 @@ FORMAT SELECTION GUIDE (when Requested Format is 'auto'):
 - Use "layers" for stacked architectures or hierarchies (e.g., OSI 7-layer model, TCP/IP stack, memory hierarchy, OS architecture, compiler phases stack).
 - Use "chart" for numeric curves, quantitative comparisons, complexity growth, or plots (e.g., Big-O curves, diode I-V curve, frequency response, benchmark comparison).
 - Use "diagram" for flowcharts, state machines, signal/data pipelines, logic block diagrams, or algorithms (e.g., MUX/DMUX flow, FSM, CPU datapath, sorting flow).
+
+STRICT SUBJECT GUARDRAIL:
+- Check whether the user's request and target concept belong to the book's subject ("{ctx['book_subject']}") or title ("{ctx['book_title']}").
+- If the request is about a different subject/discipline (for example, asking for TCP headers, networking protocols, or unrelated topics inside a Formal Languages & Automata / Compiler / non-networking book), DO NOT generate a diagram or chart. Instead, return ONLY:
+  {{
+    "kind": "refusal",
+    "title": "Out of Subject Scope",
+    "summary": "This visual request falls outside the scope of {ctx['book_title']} ({ctx['book_subject']}). Please ask about a topic within this subject."
+  }}
 
 Context:
 {ctx["context"]}
@@ -456,7 +492,12 @@ Diagram rules: 4 to 10 nodes; keep edge labels very short (1-3 words max); no La
         if self.api_key:
             try:
                 raw_spec = self._call_gemini_json(prompt)
-                clean_spec = _sanitize_visual_spec(raw_spec, fallback_title)
+                clean_spec = _sanitize_visual_spec(
+                    raw_spec,
+                    fallback_title,
+                    book_title=ctx["book_title"],
+                    book_subject=ctx["book_subject"]
+                )
                 if clean_spec:
                     return {
                         "visual_id": f"vis_{uuid.uuid4().hex[:12]}",

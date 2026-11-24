@@ -535,5 +535,7 @@ class VisualResponse(BaseModel):
     book_id: str
     chat_id: Optional[str] = None
     mode: str
-    visual: Dict[str, Any]
+    refused: bool = False
+    refusal_message: Optional[str] = None
+    visual: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime

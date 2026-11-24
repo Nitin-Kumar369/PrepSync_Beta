@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, forwardRef, useImperativeHandle } from 'react'
+import React, { useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -7,7 +7,9 @@ import {
   Handle,
   Position,
   MarkerType,
-  useReactFlow
+  useReactFlow,
+  useNodesState,
+  useEdgesState
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import dagre from '@dagrejs/dagre'
@@ -50,9 +52,7 @@ function CustomCardNode({ data }) {
 
   return (
     <div
-      onClick={() => data.onNodeClick?.(data.label)}
-      className={`w-[220px] rounded-2xl bg-white dark:bg-[#252526] border ${style.border} shadow-md hover:shadow-lg transition-all px-4 py-3 cursor-pointer group`}
-      title="Click to ask AI about this concept"
+      className={`w-[220px] rounded-2xl bg-white dark:bg-[#252526] border ${style.border} shadow-md hover:shadow-lg transition-shadow px-4 py-3 cursor-grab active:cursor-grabbing group select-none`}
     >
       {data.hasIncoming && (
         <Handle
@@ -66,9 +66,17 @@ function CustomCardNode({ data }) {
           <Icon className="w-3.5 h-3.5" />
         </div>
         <div className="min-w-0">
-          <div className="font-bold text-xs text-slate-900 dark:text-slate-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              data.onNodeClick?.(data.label)
+            }}
+            title="Click to ask AI about this concept"
+            className="nodrag cursor-pointer text-left font-bold text-xs text-slate-900 dark:text-slate-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors"
+          >
             {data.label}
-          </div>
+          </button>
           {data.subtitle && (
             <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
               {data.subtitle}
@@ -88,6 +96,27 @@ function CustomCardNode({ data }) {
 }
 
 const nodeTypes = { customCard: CustomCardNode }
+
+function buildEdgeStyle(isDark) {
+  const edgeColor = isDark ? '#64748b' : '#94a3b8'
+  return {
+    markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
+    style: { stroke: edgeColor, strokeWidth: 1.8 },
+    labelStyle: {
+      fontSize: 11,
+      fontWeight: 600,
+      fill: isDark ? '#e2e8f0' : '#334155'
+    },
+    labelBgStyle: {
+      fill: isDark ? '#1e293b' : '#ffffff',
+      fillOpacity: 0.95,
+      stroke: isDark ? '#334155' : '#cbd5e1',
+      strokeWidth: 1
+    },
+    labelBgPadding: [8, 4],
+    labelBgBorderRadius: 8
+  }
+}
 
 function computeLayout(rawNodes, rawEdges, direction = 'TB', isDark = false, onNodeClick) {
   const g = new dagre.graphlib.Graph()
@@ -117,6 +146,7 @@ function computeLayout(rawNodes, rawEdges, direction = 'TB', isDark = false, onN
     return {
       id: n.id,
       type: 'customCard',
+      draggable: true,
       position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
       data: {
         label: n.label,
@@ -130,7 +160,7 @@ function computeLayout(rawNodes, rawEdges, direction = 'TB', isDark = false, onN
     }
   })
 
-  const edgeColor = isDark ? '#64748b' : '#94a3b8'
+  const edgeVisual = buildEdgeStyle(isDark)
   const edges = rawEdges.map((e, idx) => ({
     id: `e_${idx}_${e.source}_${e.target}`,
     source: e.source,
@@ -138,21 +168,7 @@ function computeLayout(rawNodes, rawEdges, direction = 'TB', isDark = false, onN
     label: e.label || undefined,
     animated: Boolean(e.animated),
     type: 'smoothstep',
-    markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-    style: { stroke: edgeColor, strokeWidth: 1.8 },
-    labelStyle: {
-      fontSize: 11,
-      fontWeight: 600,
-      fill: isDark ? '#e2e8f0' : '#334155'
-    },
-    labelBgStyle: {
-      fill: isDark ? '#1e293b' : '#ffffff',
-      fillOpacity: 0.95,
-      stroke: isDark ? '#334155' : '#cbd5e1',
-      strokeWidth: 1
-    },
-    labelBgPadding: [8, 4],
-    labelBgBorderRadius: 8
+    ...edgeVisual
   }))
 
   const suggestedHeight = Math.min(Math.max(Math.round(maxY + 120), 290), 430)
@@ -164,10 +180,34 @@ const FlowDiagramInner = forwardRef(({ spec, onAskAboutNode }, ref) => {
   const wrapperRef = useRef(null)
   const { getNodes } = useReactFlow()
 
-  const { nodes, edges, suggestedHeight } = useMemo(
-    () => computeLayout(spec.nodes || [], spec.edges || [], spec.direction || 'TB', isDark, onAskAboutNode),
-    [spec, isDark, onAskAboutNode]
-  )
+  const [nodes, setNodes, onNodesChange] = useNodesState([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [suggestedHeight, setSuggestedHeight] = React.useState(320)
+
+  // Re-run Dagre only when the diagram specification changes
+  useEffect(() => {
+    const layout = computeLayout(
+      spec.nodes || [],
+      spec.edges || [],
+      spec.direction || 'TB',
+      isDark,
+      onAskAboutNode
+    )
+    setNodes(layout.nodes)
+    setEdges(layout.edges)
+    setSuggestedHeight(layout.suggestedHeight)
+  }, [spec, onAskAboutNode])
+
+  // Update edge colors on theme change without resetting dragged node positions
+  useEffect(() => {
+    const edgeVisual = buildEdgeStyle(isDark)
+    setEdges((prev) =>
+      prev.map((edge) => ({
+        ...edge,
+        ...edgeVisual
+      }))
+    )
+  }, [isDark, setEdges])
 
   useImperativeHandle(ref, () => ({
     exportPng: async () => {
@@ -225,7 +265,10 @@ const FlowDiagramInner = forwardRef(({ spec, onAskAboutNode }, ref) => {
         <ReactFlow
           nodes={nodes}
           edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
+          nodesDraggable
           fitView
           fitViewOptions={{ padding: 0.16 }}
           proOptions={{ hideAttribution: true }}
@@ -235,7 +278,7 @@ const FlowDiagramInner = forwardRef(({ spec, onAskAboutNode }, ref) => {
         </ReactFlow>
       </div>
       <p className="text-[11px] text-slate-400 text-center">
-        Drag to pan, scroll to zoom, or click any node to ask the tutor about it.
+        Drag nodes to rearrange, pan/zoom the canvas, or click a node title to ask the tutor about it.
       </p>
     </div>
   )

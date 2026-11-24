@@ -154,12 +154,13 @@ async def upload_status(job_id: str, admin: dict = Depends(get_current_admin)):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    book = BookModel.find_by_book_id(job.get("book_id"))
+    book_id = job.get("book_id") or ""
+    book = BookModel.find_by_book_id(book_id) if book_id else None
     return BookUploadStatusResponse(
         job_id=job_id,
-        book_id=job.get("book_id"),
+        book_id=book_id,
         book_name=book.get("title") if book else "",
-        status=job.get("status"),
+        status=job.get("status") or "unknown",
         progress=job.get("progress", 0),
         message=job.get("message", "")
     )
@@ -425,6 +426,8 @@ def _rebuild_all_task(job_id: str):
 def _rebuild_book_task(job_id: str, book_id: str):
     try:
         jobs[job_id]["status"] = "processing"
+        BookModel.update_status(book_id, status="processing")
+
         book = BookModel.find_by_book_id(book_id)
         if not book:
             raise Exception("Book not found")
@@ -452,6 +455,7 @@ def _rebuild_book_task(job_id: str, book_id: str):
         jobs[job_id]["progress"] = 100
         jobs[job_id]["message"] = f"Book {book.get('title')} rebuilt successfully"
     except Exception as e:
+        BookModel.update_status(book_id, status="failed", error_message=str(e))
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["message"] = str(e)
 
@@ -470,10 +474,14 @@ async def rebuild_book_vectors(book_id: str, background_tasks: BackgroundTasks, 
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
     job_id = generate_book_id("rebuild", book_id)
-    jobs[job_id] = {"status": "queued", "progress": 0, "message": f"Rebuilding {book.get('title')}..."}
+    jobs[job_id] = {
+        "status": "queued",
+        "progress": 0,
+        "book_id": book_id,
+        "message": f"Rebuilding {book.get('title')}..."
+    }
     background_tasks.add_task(_rebuild_book_task, job_id, book_id)
     return {"job_id": job_id, "status": "queued", "message": f"ChromaDB rebuild started for {book.get('title')}"}
-
 
 @router.post("/vectors/clear")
 async def clear_all_vectors(admin: dict = Depends(get_current_admin)):

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-
+from fastapi.responses import JSONResponse 
 # Load environment variables first
 load_dotenv()
 
@@ -190,10 +190,10 @@ app.include_router(visuals.router, prefix="/api")
 async def global_exception_handler(request, exc):
     """Global exception handler."""
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
-    return {
-        "detail": "Internal server error",
+    return JSONResponse(status_code=500, content={
+        "detail": "Internal server error", 
         "error_type": type(exc).__name__
-    }
+        })
 
 
 # ============================================

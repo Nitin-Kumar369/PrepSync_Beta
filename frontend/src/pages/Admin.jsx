@@ -44,16 +44,18 @@ export default function Admin() {
   const [editBookModal, setEditBookModal] = useState(null) 
   const [editData, setEditData] = useState({ title: '', author: '' })
 
+  const [rechunkingIds, setRechunkingIds] = useState({})
+
   useEffect(() => {
-    if (activeTab === 'stats') fetchStats()
-    if (activeTab === 'users') fetchUsers()
-    if (activeTab === 'books') fetchBooks()
-    if (activeTab === 'library') {
-      fetchTreeDepts()
-      fetchAllAdminBooks()
-    }
-    if (activeTab === 'rag-test') fetchAllBooks()
-  }, [activeTab])
+  if (activeTab === 'stats') fetchStats()
+  if (activeTab === 'users') fetchUsers()
+  if (activeTab === 'books') fetchBooks()
+  if (activeTab === 'library') {
+    fetchTreeDepts()
+    fetchAllAdminBooks()
+  }
+  if (activeTab === 'rag-test') fetchAllBooks()
+}, [activeTab, userFilter, bookFilter])
 
   useEffect(() => {
     fetchSettings()
@@ -115,6 +117,56 @@ export default function Admin() {
     } catch (e) { alert('Failed to delete') }
   }
 
+  const pollRebuildJob = (jobId, bookId) => {
+  const interval = setInterval(async () => {
+    try {
+      const res = await API.get(`/admin/upload-status/${jobId}`)
+      const status = res.data?.status
+      if (status === 'completed' || status === 'failed') {
+        clearInterval(interval)
+        setRechunkingIds(prev => {
+          const next = { ...prev }
+          delete next[bookId]
+          return next
+        })
+        fetchBooks()
+        if (activeTab === 'library') fetchAllAdminBooks()
+      }
+    } catch (e) {
+      clearInterval(interval)
+      setRechunkingIds(prev => {
+        const next = { ...prev }
+        delete next[bookId]
+        return next
+      })
+      fetchBooks()
+    }
+  }, 1500)
+}
+
+const handleRechunkBook = async (bookId) => {
+  if (!window.confirm('Rechunk and re-index this book?')) return
+  setRechunkingIds(prev => ({ ...prev, [bookId]: true }))
+  // Optimistically show processing state immediately
+  setBooks(prev => prev.map(b => (b.book_id === bookId ? { ...b, status: 'processing' } : b)))
+
+  try {
+    const res = await API.post(`/admin/vectors/rebuild/${bookId}`)
+    if (res.data?.job_id) {
+      pollRebuildJob(res.data.job_id, bookId)
+    } else {
+      fetchBooks()
+    }
+  } catch (e) {
+    setRechunkingIds(prev => {
+      const next = { ...prev }
+      delete next[bookId]
+      return next
+    })
+    fetchBooks()
+    alert(e.response?.data?.detail || 'Failed to start rechunking')
+  }
+}
   const fetchAllBooks = async () => {
     try {
       const res = await API.get('/admin/books')
@@ -321,7 +373,7 @@ export default function Admin() {
       await API.post('/admin/settings', { gemini_api_key: geminiKey })
       setKeyMessage('Gemini key saved successfully')
     } catch (e) { setKeyMessage('Failed to save') } finally { setKeyLoading(false) }
-  }
+}
 
   return (
     <div className="p-8 bg-slate-50 min-h-screen">
@@ -552,11 +604,29 @@ export default function Admin() {
                         </td>
                         <td className="px-6 py-4">{book.total_chunks}</td>
                         <td className="px-6 py-4">{book.file_size_mb?.toFixed(2) || '-'}</td>
-                        <td className="px-6 py-4 text-sm font-medium">
-                          <button onClick={() => handleDeleteBook(book.book_id)} className="text-red-600 hover:text-red-800">
-                            Delete
-                          </button>
-                        </td>
+                        <td className="px-6 py-4 text-sm font-medium space-x-3 whitespace-nowrap">
+  {(() => {
+    const isRechunking = !!rechunkingIds[book.book_id] || book.status === 'processing'
+    return (
+      <>
+        <button
+          onClick={() => handleRechunkBook(book.book_id)}
+          disabled={isRechunking}
+          className="text-blue-600 hover:text-blue-800 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {isRechunking ? 'Rebuilding...' : 'Rebuild'}
+        </button>
+        <button
+          onClick={() => handleDeleteBook(book.book_id)}
+          disabled={isRechunking}
+          className="text-red-600 hover:text-red-800 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Delete
+        </button>
+      </>
+    )
+  })()}
+</td>
                       </tr>
                     ))}
                   </tbody>
